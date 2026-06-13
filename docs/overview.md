@@ -14,13 +14,23 @@ Nuvio is a powerful media aggregator designed to provide a unified interface for
 ```mermaid
 graph TD
     User([User]) --> App[Nuvio App]
-    App --> Addons[Addons / Manifests]
-    Addons --> Scrapers[Scrapers/Indexers]
-    Scrapers --> Metadata[(Metadata Source)]
-    Scrapers --> Debrid[Debrid Service]
-    Debrid --> Streams[4K/HD Streams]
-    Streams --> Player[Internal/External Player]
+    
+    %% Syncing
     App -.-> Trakt[Trakt/Simkl Sync]
+    
+    %% UI Generation Flow
+    App --> MetaAddons[Catalog & Metadata Addons]
+    MetaAddons --> Metadata[(TMDB / IMDb / Trakt)]
+    
+    %% Playback Flow (Triggers on click)
+    App --> StreamAddons[Stream Addons]
+    StreamAddons --> Scrapers[Scrapers / Indexers]
+    Scrapers --> Debrid[Debrid Service]
+    
+    %% Routing the stream
+    Debrid --> Links[Resolved Direct Link]
+    Links --> App
+    App --> Player[Internal / External Player]
 ```
 
 ## How It Works
