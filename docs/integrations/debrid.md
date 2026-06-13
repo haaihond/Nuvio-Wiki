@@ -31,7 +31,7 @@ A premium all-in-one service that includes a personal cloud and a built-in VPN.
 ### 4. AllDebrid (AD)
 A highly reliable alternative to Real-Debrid with excellent customer support and browser extensions.
 - **Pros:** Great reliability, high speeds, supports many hosters.
-- **Cons:** Slightly smaller cache than RD in some niche categories. 1 IP at once.
+- **Cons:** Smaller cache than RD in some niche categories. 1 IP at once.
 - **Setup:** [alldebrid.com/pin](https://alldebrid.com)
 
 ### 5. Offcloud / Put.io
