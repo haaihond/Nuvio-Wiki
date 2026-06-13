@@ -14,7 +14,19 @@ A fast-growing service that excels in Usenet support (pro teir only) alongside t
 - **Cons:** Newer service, can have stability issues.
 - **Setup:** [torbox.app/settings](https://torbox.app)
 
-### 2. Real-Debrid (RD)
+### 2. Premiumize (PM)
+A premium all-in-one service that includes a personal cloud and a built-in VPN.
+- **Pros:** Personal cloud storage, 1TB limit, built-in VPN, allows multiple IPs.
+- **Cons:** More expensive than RD/AD. Has a points system the equuates to about 1 TB a month.
+- **Setup:** [premiumize.me/device](https://premiumize.me)
+
+### 3. OffCloud
+Uses PM Cache but without the extra PM services.
+- **Pros:** Uses PM's cache, more affordable than PM, no IP limit
+- **Cons:** Has a 1 TB monthly usage limit
+- **Setup:** [offcloud.com](https://offcloud.com/#pricing)
+
+### 4. Real-Debrid (RD)
 The most popular and cost-effective service with the largest cache of files.
 > [!WARNING]
 > Real Debrid has recentley faced legal issues and a large amount of files are now being blocked. Your milage may vary based on usage of this service.
@@ -22,21 +34,11 @@ The most popular and cost-effective service with the largest cache of files.
 - **Cons:** Strict 1 IP rule (cannot use on two different internet connections at once), varying blocking of content
 - **Setup:** [real-debrid.com/device](https://real-debrid.com/)
 
-### 3. Premiumize (PM)
-A premium all-in-one service that includes a personal cloud and a built-in VPN.
-- **Pros:** Personal cloud storage, 1TB limit, built-in VPN, allows multiple IPs (using "Points" system).
-- **Cons:** More expensive than RD/AD. Has a points system the equuates to about 1 TB a month.
-- **Setup:** [premiumize.me/device](https://premiumize.me)
-
-### 4. AllDebrid (AD)
+### 5. AllDebrid (AD)
 A highly reliable alternative to Real-Debrid with excellent customer support and browser extensions.
 - **Pros:** Great reliability, high speeds, supports many hosters.
 - **Cons:** Smaller cache than RD in some niche categories. 1 IP at once.
 - **Setup:** [alldebrid.com/pin](https://alldebrid.com)
-
-### 5. Offcloud / Put.io
-- **Offcloud:** Great for direct links and cloud downloads.
-- **Put.io:** Best-in-class personal cloud for torrent management.
 
 ## 💡 Why use Debrid?
 1. **No Buffering:** Streams are served from high-speed data centers, not peer-to-peer.
