@@ -6,18 +6,24 @@ Nuvio on iOS typically requires **Sideloading** (AltStore/Sideloadly). Apple all
 >Please do not message the Nuvio developers asking when testflight spots will be open. This not in their control.
 
 **Sideloadly Method**
+
 1.Install Sideloadly
     - Download and install Sideloadly on your Mac or Windows PC. (Windows users: You still need the direct-download versions of iTunes and iCloud installed from Apple's website, not the Microsoft Store).
+    
 2.Connect your iPhone:Plug your phone into your computer via USB. Unlock it and tap Trust This Computer if prompted.
+
 3.Load the IPA file
     - Open Sideloadly on your computer. Drag and drop your downloaded .ipa file directly into the Sideloadly window, or click the IPA icon on the left to browse your computer for the file.
+    
 4.Enter Apple ID and Start:
     - Type your Apple ID email into the designated box. 
     - Click the Start button at the bottom. A prompt will appear asking for your Apple ID password — enter it so Sideloadly can request the signing certificate from Apple.
+    
 5.Trust the developer profile: Required to launch the app.
     - Once Sideloadly says "Done" and the app appears on your phone's home screen, do not open it yet. 
     - Go to your iPhone's Settings > General > VPN & Device Management. 
     - Tap your Apple ID under "Developer App" and select Trust.
+    
 6.Enable Developer Mode: Required on iOS 16 and newer.
     - If you haven't already done this for a previous app, go to Settings > Privacy & Security > Developer Mode. Toggle it on and let your phone restart.
 
