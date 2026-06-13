@@ -20,7 +20,7 @@ graph TD
     
     %% UI Generation Flow
     App --> MetaAddons[Catalog & Metadata Addons]
-    MetaAddons --> Metadata[(TMDB / IMDb / Trakt)]
+    MetaAddons --> Metadata[(TMDB / IMDb / Kitsu / TVDB)]
     
     %% Playback Flow (Triggers on click)
     App --> StreamAddons[Stream Addons]
