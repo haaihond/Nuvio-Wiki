@@ -6,6 +6,8 @@
 
 Welcome to the unofficial hub for **Nuvio**, a modern media player and aggregator. This repository provides comprehensive guides and troubleshooting for users on all platforms.
 
+If you need something to help you get through this here is a [1 hour subway surfers video for your enjoyment](https://www.youtube.com/watch?v=ChBg4aowzX8).
+
 > [!IMPORTANT]
 > Nuvio is free and open source. [Please consider donating to keep free and open source projects running](https://tapframe.space/contribute). FOSS software plays a vital role in the world and it is up the users to keep these projects running.
 
