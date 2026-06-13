@@ -3,7 +3,7 @@
 Addons are the heart of the Nuvio experience. They provide the content and functionality that make the app useful.
 
 >[!WARNING]
->The naming, identifying, linking, or describing specific addons will not be covered in this Wiki.
+>The naming, identifying, linking, or describing specific addons will not be covered in this Wiki. This Wiki does not condone the use of an copyrighted material.
 
 ## Types of Addons
 
