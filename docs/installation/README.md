@@ -1,4 +1,4 @@
-# Installation Guides (WIP)
+# Installation Guides
 
 Nuvio supports a variety of platforms. Select your device below for specific installation instructions:
 
