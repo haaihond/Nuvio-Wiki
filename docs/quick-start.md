@@ -7,7 +7,7 @@
 Want to get Nuvio up and running in 10 minutes? Follow this sequence:
 
 ## 1. Install the App
-- **Android:** Download the APK and install. [Full Guide](addons/README.md)
+- **Android:** Download the APK and install. [Full Guide](installation/android-mobile.md)
 - **Android TV:** Use the "Downloader" app to get the TV APK. [Full Guide](installation/android-tv.md)
 
 ## 2. Add Your First Addon
