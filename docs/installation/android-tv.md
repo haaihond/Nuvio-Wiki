@@ -7,7 +7,15 @@ Just like on Android Mobile, there are two ways to install Nuvio on Android Mobi
 
 **APK Version**
 1.  **Option 1 Enter the Downloader code**
-    - Using the Downloader app obtained from the play store on the TB enter the code
+    - Enable developer options
+        - Go to your TV's Settings > System (or Device Preferences) > About. Scroll down to              Android TV OS build (or just Build) and click your remote's select button on it 7              times until a pop-up appears saying "You are now a developer!"
+        - Go back to the main Settings menu. Navigate to Apps > Security & Restrictions                  Unknown sources (or Install unknown apps). Find the Downloader app in the list                 and toggle the switch to the On position.
+    - Using the Downloader app obtained from the play store
+        - Open the Downloader app from your home screen.
+        - When prompted, select Allow so the app can save files to your device.
+        - Select the URL/Search box on the Home tab, type your code exactly: 1456465
+    - The Downloader app will redirect and automatically download the Nuvio TV APK. When the         prompt appears, click Install. Once finished, select Done (instead of Open).
+    - Finally, hit Delete twice in the Downloader app to remove the setup file and save your         TV's storage space.
 1.  **Option 2 Download the APK:** Obtain the latest [mobile APK from Nuvio's official Github](https://github.com/NuvioMedia/NuvioTV/releases/tag/0.7.6-beta)
 2.  **Enable Unknown Sources:**
     - Go to **Settings** > **Apps** > **Install Unknown Apps**.
