@@ -20,7 +20,7 @@ Nuvio maintains has a community-driven ecosystem. Popular sources include:
 - Meteor
 - Debridio (Paid $10/year)
 
-## Setup Links
+## Setup Links (WIP)
 
 To add an addon, you typically need a manifest URL.
 - These will be generated when configuring the addon. The manifest generated will be pasted into the addons tab of Nuvio.
