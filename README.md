@@ -1,0 +1,37 @@
+# 🌌 Nuvio Unofficial Wiki
+
+[**Quick Start**](docs/quick-start.md) | [**Troubleshooting**](docs/troubleshooting.md) | [**Official Links**](docs/official-links.md) | [**Report Issue**](../../issues)
+
+---
+
+Welcome to the unofficial hub for **Nuvio**, a modern media player and aggregator. This repository provides comprehensive guides and troubleshooting for users on all platforms.
+
+> [!IMPORTANT]  
+> **Disclaimer:** This is **NOT** an official Nuvio wiki. This project is community-maintained and is not affiliated with the official Nuvio development team.
+
+## 📚 Documentation
+
+### 🚀 Getting Started
+*   [**Quick Start Guide**](docs/quick-start.md) - Get up and running in 5 minutes.
+*   [General Overview](docs/overview.md) - How Nuvio works.
+*   [Glossary](docs/glossary.md) - Common terms explained.
+
+### 📥 Installation
+*   [Android TV](docs/installation/android-tv.md)
+*   [Android Mobile](docs/installation/android-mobile.md)
+*   [iOS / Sideloading](docs/installation/ios.md)
+
+### ⚙️ Configuration
+*   [Addons Guide](docs/addons/README.md) - Finding and installing manifests.
+*   [Settings Breakdown](docs/settings/README.md) - UI & Playback options.
+*   [Debrid Integration](docs/integrations/debrid.md) - Real-Debrid setup.
+
+### 🆘 Support & Info
+*   [Troubleshooting](docs/troubleshooting.md) - Fix common issues.
+*   [FAQ](docs/faq.md) - Frequently asked questions.
+*   [Feature List](docs/features.md) - What Nuvio can do.
+
+---
+
+### 🤝 Contribution
+Contributions are vital! Please see the [Contributing Guide](CONTRIBUTING.md) to help improve these docs.
