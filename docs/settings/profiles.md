@@ -6,4 +6,4 @@
 3. Individual Watch Histories: Each profile maintains its own progress, history, and "Continue Watching" queues without interfering with the viewing habits of others.
 4. Per-Profile Trakt Syncing: Link separate Trakt accounts to individual profiles to maintain accurate, user-specific external watch logs.
 5. Profile Cloning: Seamlessly clone add-ons, plugins, and custom collections from one profile to another via the web-based Account Manager.
-6. Cross-Device Sync: Configurations and watch progress sync automatically across all supported devices (Fire TV, Android, PC, etc.).
+6. Cross-Device Sync: Configurations and watch progress sync automatically across all supported devices (Android TV, Android Mobile , etc.).
