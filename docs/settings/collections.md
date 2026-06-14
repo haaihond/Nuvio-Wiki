@@ -1,16 +1,25 @@
 [Home](../../README.md) | [Quick Start](../../docs/quick-start.md) | [Overview](../../docs/overview.md) | [Features](../../docs/features.md) | [Installation](../../docs/installation/README.md) | [Settings](../../docs/settings/README.md) | [Troubleshooting](../../docs/troubleshooting.md) | [FAQ](../../docs/faq.md)
 
 ---
+
 ## Nuvio Collections
 
->[!CAUTION]
->Creating collections should be considered an advanced user feature (seriously this is a warning). If you do not consider yourself an advanced user it is recommended to copy one from [Nuvio's community collections](https://nuvio.tv/community-collections)
+> [!CAUTION]
+> Creating collections should be considered an advanced user feature (seriously, this is a warning). If you don't consider yourself an advanced user, it's recommended to copy one from [Nuvio's community collections](https://nuvio.tv/community-collections) instead.
 
-### Nuvio Collection Structures
+### Contents
 
-Nuvio collections can be confusing. At its core though, it is a file system with folders and subfolders and files in those subfolders (catalogs). Below is a diagram to illustrate this.
+- [Understanding Collection Structure](#understanding-collection-structure)
+- [Before You Start](#before-you-start)
+- [Creating Your First Collection](#creating-your-first-collection)
+- [The Folders Tab](#the-folders-tab)
+  - [Add Catalog](#add-catalog)
+  - [Add TMDB](#add-tmdb)
+  - [Add Trakt](#add-trakt)
 
-### Simplified Catalog Structure
+### Understanding Collection Structure
+
+Nuvio collections can be confusing, but at their core they're just a file system: folders containing subfolders, which contain files (catalogs). The diagram below illustrates this relationship.
 
 ```mermaid
 graph LR
@@ -19,7 +28,7 @@ graph LR
 
     Folder1 --> Movies2020[📄 List of 2020s Movies *catalog for list*]
     Folder2 --> Movies2010[📄 List of 2010s Movies *catalog for list*]
-    
+
     %% Styling
     classDef category fill:#2a2a2a,stroke:#333,stroke-width:2px,color:#fff
     classDef folder fill:#005f73,stroke:#001219,stroke-width:2px,color:#fff
@@ -30,74 +39,107 @@ graph LR
     class Movies2020,Movies2010 list
 ```
 
-**To Create a collection**
+### Before You Start
 
-There are a few key things you will need to create a collection.
-1. A metadata addon with your catalogs that you want to be in a collection already created. This guide will be assuming you have done this.
-2. Images or gifs for your collections. These can be sourced from the internet or from [Nuvio's community covers](https://nuvio.tv/covers)
-    - Note that if you do not use Nuvio's community covers the image or source gif must be the actual location that the image is located in.
-        - For example, https://github.com/rrevanth/nuvio-assets/blob/main/popular/new/new-poster.png **will not work**
-        - https://raw.githubusercontent.com/rrevanth/nuvio-assets/refs/heads/main/popular/new/new-poster.png **will work**
-    - You can optionally, upload your own images or gifs you'd like to use to Nuvio's community collections.
+You'll need two things to create a collection:
 
-Great, now that we have that figured out, lets create our first collection. You can do this in the app or on the Nuvio website but using the website is recommended.
-1. Once logged into your account, make sure you are on the account tab.
-2. On the left sidebar, select collections
-3. Select create collection
-4. You will be prompted to select a template to start, we will skip that in this guide so select continue
-5. There will be multiple options on this tab
-    - Collection ID: leave this as is
-    - Title: Put what you want the name that will show on the collection
-    - View Mode: There will be 3 options: tabbed grid, rows, or follow layout
-        - Tabbed grid will appear as, well a grid with tabs inside of the collection. Each subfolder will have its own tab with this option. If you want to Make an Action catalog with with Action movies 2020 and Action movies 2010 within this catalog, both of those will have their own tab inside of this catalog. These tabs will be in a grid layout
-        - Rows will show rows inside of the collection. If you want to Make an Action catalog with with Action movies 2020 and Action movies 2010 within this catalog, both of those will be under the same tab but on their own rows.
-        - Follow layout will follow the layout of what you have set in the Nuvio app
-    - Backdrop Image or GIF URL: This is where you will paste the url that we previously mentioned how to get
-    - Show all Tab: With this selected an extra tab will be added to this collection that will combine all of subfolders you add under this collection
-    - Pin to top: This will move the collection to the front ahead of others
-    - Enable focus glow: Will add a highlight effect when you hover over the collection
-6. Now at the folders tab you will have many options in here:
-    - Outline on the left side
-        - This is where you will add what you want to show on your homescreen for this collection. For instance, if you are creating a Collection called "franchises", and what to have separate blocks on your home screen for the Matrix, Lord of the Rings, Star Wars, you will had a folder here for each one.
-    - Folder ID: Keep this as is
-    - Folder Title: This is what the name of the tab or row will be INSIDE of the collection. E.g. The Collection will be named Action, and the tabs will be named Action Movies 2020 and Action Movies 2010
-    - TileShape: Choose what you prefer the shape to be between landscape, square, or portrait
-    - Sources:
-       - You will have an option to add catalog, add TMDB, and Add Trakt
-            - Selecting add catalog you will be asked to choose the source of the addon. This will come from you metadata addon e.g. aiometadata
-                - You will also be asked for the catalog. You will pick the catalog that you made using an addon like aiometadata
-            - Selecting add TMDB will provide you many options. They fall into these buckets:
-                - General Settings (Common Across All Sources)
-                    - These settings define the basic presentation and ordering of your collection within Nuvio.
-                    - Type: Determines the media format for the list. You can select either Movie or Series.
-                    - Name: The custom title for your collection. This is exactly how the list will be labeled on your Nuvio interface (e.g., "Top Sci-Fi" or "My Watchlist").
-                    - Sort By: Controls the display sequence of the media. Common options include:
-                        - Original: Keeps the exact order set by the database or list creator.
-                        - Recent: Sorts by release date.
-                        - Top Rated: Ranks items by their user review scores or the total number of ratings.
-                - ID-Based Sources
-                    - Most sources require a specific identifier to pull the correct metadata from the respective database.
-                    - Sources: TMDB List, Trakt List, TMDB Keyword, TMDB Company, TMDB Collection.
-                    - ID Field: This requires a specific numerical or alphanumeric code. You must locate the exact list, collection, company, or keyword on TMDB or Trakt and extract the ID from its URL. For example, in the TMDB URL themoviedb.org/collection/1248, the ID is 1248.
-                - Unique Sources
-                    - Certain sources use different input fields instead of a standard ID to gather content.
-                    - TMDB Discover:
-                        - Genres Field: Instead of an ID, you select one or more genres from a dropdown menu (such as Action, Horror, or Science Fiction). This dynamically generates a collection of media that fits those specific categories directly from TMDB's database.
-                    - Letterboxd List:
-                        - URL Field: This requires the full web address of the Letterboxd list you wish to import. You must paste the exact link from your browser rather than looking for a specific ID code.
-            - Selecting Trakt will provide you these options:
-                - The Core Settings (Always Required): Whenever you create a new Trakt-sourced collection, these base options must be configured first:
-                    - Type: Determines the media format for the row. Select either Movie or Series.
-                    - Name: The custom label for your collection (e.g., "My Trakt Watchlist" or "Trending Shows"). This is the text that appears on your Nuvio home screen.
-                    - Sort By: Controls how the items are ordered within the collection:
-                        - Default: Retains the native layout or ranking order provided by Trakt.
-                        - Title (asc/desc): Arranges items alphabetically.
-                        - Primary Release Date (asc/desc): Orders items chronologically by their release year.
-                - Trakt Source-Specific Settings: After choosing your specific Trakt option from the source dropdown menu, configure its unique fields below:
-                    - Trakt List
-                    - Pulls a specific, static list created by you or another user on Trakt.
-                - URL: Requires the full web address of the target Trakt list.
-                    - 🚨 Critical URL Formatting Rule: The link must use the standard desktop domain format. Nuvio cannot read mobile or app-generated links.
-                    - ✅ Correct Format: https://trakt.tv/users/...
-                    - ❌ Incorrect Format: https://app.trakt.tv/...
-                    - If the app.trakt.tv link is used, the collection will fail to sync and remain empty.
+1. **A metadata addon with your catalogs** already set up, containing the catalogs you want included. This guide assumes that's done.
+2. **Images or GIFs for your collection covers**, sourced from the internet or from [Nuvio's community covers](https://nuvio.tv/covers).
+   - If you're not using a community cover, the URL must point directly to the image or GIF file itself — not to a webpage that displays it:
+     - ❌ Incorrect: `https://github.com/rrevanth/nuvio-assets/blob/main/popular/new/new-poster.png`
+     - ✅ Correct: `https://raw.githubusercontent.com/rrevanth/nuvio-assets/refs/heads/main/popular/new/new-poster.png`
+   - You're also welcome to upload your own images or GIFs to Nuvio's community collections for others to use.
+
+### Creating Your First Collection
+
+You can create a collection either in the app or on the Nuvio website — the website is recommended.
+
+1. Once logged in, make sure you're on the **Account** tab.
+2. In the left sidebar, select **Collections**.
+3. Select **Create Collection**.
+4. You'll be prompted to choose a starting template — select **Continue** to skip this for now.
+5. Configure the collection's general settings:
+   - **Collection ID**: leave this as is.
+   - **Title**: the name shown for the collection.
+   - **View Mode**: choose one of three layouts:
+     - **Tabbed Grid**: each subfolder appears as its own tab, displayed in a grid. For example, an Action catalog containing "Action Movies 2020" and "Action Movies 2010" subfolders would show each as a separate tab.
+     - **Rows**: each subfolder appears as its own row, all under a single tab. Using the same example, "Action Movies 2020" and "Action Movies 2010" would appear as separate rows under one tab.
+     - **Follow Layout**: follows whatever layout is set in the Nuvio app.
+   - **Backdrop Image or GIF URL**: the image URL described in [Before You Start](#before-you-start).
+   - **Show All Tab**: adds an extra tab that combines all the subfolders in this collection.
+   - **Pin to Top**: moves the collection ahead of others.
+   - **Enable Focus Glow**: adds a highlight effect when hovering over the collection.
+6. Switch to the **Folders** tab to configure the collection's content — covered in detail below.
+
+### The Folders Tab
+
+The Folders tab is where you define the subfolders ("blocks") that make up your collection:
+
+- **Outline** (left sidebar): add one entry per block you want shown on your home screen. For example, a "Franchises" collection might have separate entries for The Matrix, The Lord of the Rings, and Star Wars.
+- **Folder ID**: keep this as is.
+- **Folder Title**: the name shown for this folder's tab or row. For example, in an "Action" collection, folders might be titled "Action Movies 2020" and "Action Movies 2010".
+- **TileShape**: choose **Landscape**, **Square**, or **Portrait**.
+- **Sources**: populate the folder using **Add Catalog**, **Add TMDB**, or **Add Trakt**, described below.
+
+#### Add Catalog
+
+Choose the addon that contains the catalog you want (e.g., AIOMetadata), then select the specific catalog you created with that addon.
+
+#### Add TMDB
+
+TMDB sources are configured across three groups of settings.
+
+**General settings** *(common to all TMDB sources)*
+
+These settings define the basic presentation and ordering of your collection within Nuvio.
+
+- **Type**: the media format for the list — either **Movie** or **Series**.
+- **Name**: the custom title for this collection, shown exactly as entered (e.g., "Top Sci-Fi" or "My Watchlist").
+- **Sort By**:
+  - **Original**: the order set by the database or list creator.
+  - **Recent**: sorted by release date.
+  - **Top Rated**: ranked by review score or rating count.
+
+**ID-based sources**
+
+Most sources need a specific identifier to pull the right metadata from the respective database.
+
+- **Sources**: TMDB List, Trakt List, TMDB Keyword, TMDB Company, TMDB Collection.
+- **ID Field**: a numerical or alphanumeric code, found in the URL of the relevant list, collection, company, or keyword on TMDB or Trakt. For example, in `themoviedb.org/collection/1248`, the ID is `1248`.
+
+**Unique sources**
+
+A couple of sources use different input fields instead of a standard ID:
+
+- **TMDB Discover**: instead of an ID, select one or more genres (e.g., Action, Horror, Science Fiction) from a dropdown. This dynamically builds a collection of media matching those categories from TMDB's database.
+- **Letterboxd List**: paste the full URL of the Letterboxd list you want to import. Use the exact link from your browser rather than searching for a separate ID.
+
+#### Add Trakt
+
+Trakt sources are configured across two groups of settings.
+
+**Core settings** *(always required)*
+
+Whenever you create a new Trakt-sourced collection, configure these base options first:
+
+- **Type**: the media format for the row — either **Movie** or **Series**.
+- **Name**: the custom label for this collection, shown on your Nuvio home screen (e.g., "My Trakt Watchlist" or "Trending Shows").
+- **Sort By**:
+  - **Default**: Trakt's native order.
+  - **Title (asc/desc)**: alphabetical.
+  - **Primary Release Date (asc/desc)**: chronological, by release year.
+
+**Source-specific settings**
+
+After choosing your Trakt source type from the dropdown, configure its unique fields:
+
+- **Trakt List**: pulls a specific, static list created by you or another Trakt user.
+  - **URL**: the full web address of the target Trakt list.
+
+> [!CAUTION]
+> **URL formatting matters.** The link must use the standard desktop domain format — Nuvio cannot read mobile or app-generated links.
+>
+> - ✅ Correct: `https://trakt.tv/users/...`
+> - ❌ Incorrect: `https://app.trakt.tv/...`
+>
+> Using an `app.trakt.tv` link will cause the collection to fail syncing and remain empty.
