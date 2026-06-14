@@ -31,4 +31,4 @@ For high-quality 4K streaming without buffering:
 - Login with Trakt to sync your watchlist and progress.
 
 ---
-**Need more help?** Dive into the [Full Documentation](/docs/settings/README.md).
+**Need more help?** Dive into the [Full Documentation](settings/README.md).

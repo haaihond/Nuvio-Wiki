@@ -3,7 +3,7 @@
 ---
 # Android TV Installation
 
-Just like on Android Mobile, there are two ways to install Nuvio on Android Mobile. One, is getting it from the play store and the second, is sideloading it.
+Just like on Android Mobile, there are two ways to install Nuvio on Android TV. One, is getting it from the play store and the second, is sideloading it.
 
 > [!NOTE]
 > The google play store version lacks some features of the apk sideload version to comply with the Play Stores policies. It is recommended that you sideload it.

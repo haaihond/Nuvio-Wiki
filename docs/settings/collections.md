@@ -4,7 +4,7 @@
 ## Nuvio Collections
 
 >[!CAUTION]
->Creating collections should be considered an advanced user feature (seriously this is a warning). If you do not consider yourself an advanced user it is recommend to copy one from [Nuvio's community collections](https://nuvio.tv/community-collections)
+>Creating collections should be considered an advanced user feature (seriously this is a warning). If you do not consider yourself an advanced user it is recommended to copy one from [Nuvio's community collections](https://nuvio.tv/community-collections)
 
 ### Nuvio Collection Structures
 
@@ -60,7 +60,7 @@ Great, now that we have that figured out, lets create our first collection. You 
     - Outline on the left side
         - This is where you will add what you want to show on your homescreen for this collection. For instance, if you are creating a Collection called "franchises", and what to have separate blocks on your home screen for the Matrix, Lord of the Rings, Star Wars, you will had a folder here for each one.
     - Folder ID: Keep this as is
-    - Folder Title: This is what the name of the tab or row will be INSIDE of the collection. E.g. The Collection will be named Action, and the tabs will be named Action Movies 2020 and Action Movies 20109
+    - Folder Title: This is what the name of the tab or row will be INSIDE of the collection. E.g. The Collection will be named Action, and the tabs will be named Action Movies 2020 and Action Movies 2010
     - TileShape: Choose what you prefer the shape to be between landscape, square, or portrait
     - Sources:
        - You will have an option to add catalog, add TMDB, and Add Trakt
@@ -85,9 +85,12 @@ Great, now that we have that figured out, lets create our first collection. You 
                         - Genres Field: Instead of an ID, you select one or more genres from a dropdown menu (such as Action, Horror, or Science Fiction). This dynamically generates a collection of media that fits those specific categories directly from TMDB's database.
                     - Letterboxd List:
                         - URL Field: This requires the full web address of the Letterboxd list you wish to import. You must paste the exact link from your browser rather than looking for a specific ID code.
-            - Selection Trakt will provide you these options
-    The Core Settings (Always Required)
+            - Selecting Trakt will provide you these options:
+
+### The Core Settings (Always Required)
+
 Whenever you create a new Trakt-sourced collection, these base options must be configured first:
+
 
 Type: Determines the media format for the row. Select either Movie or Series.
 
@@ -101,8 +104,10 @@ Title (asc/desc): Arranges items alphabetically.
 
 Primary Release Date (asc/desc): Orders items chronologically by their release year.
 
-Trakt Source-Specific Settings
+### Trakt Source-Specific Settings
+
 After choosing your specific Trakt option from the source dropdown menu, configure its unique fields below:
+
 
 Trakt List
 Pulls a specific, static list created by you or another user on Trakt.

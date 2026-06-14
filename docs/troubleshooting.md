@@ -26,4 +26,4 @@ Find solutions to common issues with Nuvio below.
 | **Addons Disappeared** | Re-install the manifest link. Some community links change frequently. |
 
 ---
-**Still having trouble?** Check the [Official Channels](docs/official-links.md) for community support.
+**Still having trouble?** Check the [Official Channels](official-links.md) for community support.
