@@ -19,7 +19,7 @@ Apple provides 10k spots to developers. These spots are often fully filled and r
 It is required that your metadata addons be first in the list of your addons. You can move them to the top spot within a Nuvio app under addons.
 
 ### Why can't I install plugins?
-If you installed Nuvio from an app store, the plugin feature is not included. You must use a sideload method to use Nuvio's plugin feature. You need to use the plugin section of Nuvio. Trying to install a plugin in the addon section of Nuvio will result in an error.
+If you installed Nuvio from an app store, the plugin feature is not included. You must use a sideload method to use Nuvio's plugin feature. When installing a plugin, you need to use the plugin section of Nuvio. Trying to install a plugin in the addon section of Nuvio will result in an error.
 
 ### What's the deal with trailers?
 With TMDB inegration configured, trailers will pull and play from TMDB. With it off, it will be pulled from your addons. The easiest way to ensure trailers work is to enable TMDB enrichment under integrations. TMDB API keys are free to obtain. Trailers are also only available on the sideload versions of Nuvio.
