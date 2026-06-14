@@ -24,5 +24,5 @@ If you installed Nuvio from an app store, the plugin feature is not included. Yo
 ### What's the deal with trailers?
 With TMDB inegration configured, trailers will pull and play from TMDB. With it off, it will be pulled from your addons. The easiest way to ensure trailers work is to enable TMDB enrichment under integrations. TMDB API keys are free to obtain. Trailers are also only available on the sideload versions of Nuvio.
 
-## Where do I get images or gifs for my collections or profile?
+### Where do I get images or gifs for my collections or profile?
 The easiest way is to get them [Nuvio's community covers](https://nuvio.tv/covers).
