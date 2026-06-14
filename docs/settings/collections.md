@@ -90,9 +90,9 @@ Great, now that we have that figured out, lets create our first collection. You 
                     - Type: Determines the media format for the row. Select either Movie or Series.
                     - Name: The custom label for your collection (e.g., "My Trakt Watchlist" or "Trending Shows"). This is the text that appears on your Nuvio home screen.
                     - Sort By: Controls how the items are ordered within the collection:
-                    - Default: Retains the native layout or ranking order provided by Trakt.
-                    - Title (asc/desc): Arranges items alphabetically.
-                    - Primary Release Date (asc/desc): Orders items chronologically by their release year.
+                        - Default: Retains the native layout or ranking order provided by Trakt.
+                        - Title (asc/desc): Arranges items alphabetically.
+                        - Primary Release Date (asc/desc): Orders items chronologically by their release year.
                 - Trakt Source-Specific Settings: After choosing your specific Trakt option from the source dropdown menu, configure its unique fields below:
                     - Trakt List
                     - Pulls a specific, static list created by you or another user on Trakt.
