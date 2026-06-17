@@ -1,6 +1,3 @@
-[Home](../../README.md) | [Quick Start](../../docs/quick-start.md) | [Overview](../../docs/overview.md) | [Features](../../docs/features.md) | [Installation](../../docs/installation/README.md) | [Settings](../../docs/settings/README.md) | [Integrations](../../docs/integrations/README.md) | [Troubleshooting](../../docs/troubleshooting.md) | [FAQ](../../docs/faq.md)
-
----
 # Addons Guide
 
 Addons are the heart of the Nuvio experience. They provide the content and functionality that make the app useful.

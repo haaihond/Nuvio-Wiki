@@ -1,6 +1,6 @@
 # Nuvio Wiki
 
-A modern, searchable documentation site for Nuvio. The site is community-maintained and is not affiliated with the official Nuvio development team. The website is live on: https://nuvio-wiki.duckdns.org/
+A modern, searchable documentation site for Nuvio. The site is community-maintained and is not affiliated with the official Nuvio development team. The website is live on: https://nuvio.wiki/
 
 ## Local development
 

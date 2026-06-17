@@ -1,7 +1,3 @@
-[Home](../../README.md) | [Quick Start](../../docs/quick-start.md) | [Overview](../../docs/overview.md) | [Features](../../docs/features.md) | [Installation](../../docs/installation/README.md) | [Settings](../../docs/settings/README.md) | [Integrations](../../docs/integrations/README.md) | [Troubleshooting](../../docs/troubleshooting.md) | [FAQ](../../docs/faq.md)
-
----
-
 ## Debrid Integration
 
 Nuvio utilizes a centralized architecture for debrid integration. Instead of passing personal API keys to individual P2P scraping addons, accounts are linked directly within the core Nuvio Android and TV application. Nuvio intercepts the raw P2P hashes from your configured addons, verifies cache availability, and handles the link resolution natively by wrapping the addon in your debrid service.
