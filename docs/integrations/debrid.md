@@ -84,7 +84,7 @@ A fast-growing service that excels in Usenet support (pro tier only) alongside t
   * **Standard:** ~$5.00/month or ~$55.00/year
   * **Pro:** ~$10.00/month or ~$110.00/year: Provides access to Usenet
 * **Deals & Discounts:** Users can receive a referral bonus on their first purchase, adding 7 days of extra free time per month purchased. Annual plans combined with coupon codes and cryptocurrency payments can significantly lower the monthly equivalent cost. Torbox typically offers Black Friday sales for 30% off. 
-* **Setup:** [torbox.app/settings](https://torbox.app)
+* **Setup:** [torbox.app/settings](https://torbox.app/subscription?referral=41d1ac85-ee5e-4699-9f0a-92e67cbc2fb2)
 
 #### 2. Premiumize (PM)
 A premium all-in-one service that includes a personal cloud and a built-in VPN.
