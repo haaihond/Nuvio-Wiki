@@ -7,7 +7,7 @@ import './custom.css'
 export default {
   extends: DefaultTheme,
   Layout: () => h(DefaultTheme.Layout, null, {
-    'doc-footer-before': () => h(BackToTop)
+    'doc-after': () => h(BackToTop)
   }),
   enhanceApp({ app }) {
     app.component('BackToTop', BackToTop)
