@@ -28,7 +28,14 @@ To add an addon, you typically need a manifest URL obtained from the addon
 ### Configuring AIOStreams & P2P Addons
 For Nuvio to resolve anything, it first needs a source to scrape the magnet links. You must configure your scraper addons **without** a Debrid API key and strictly in **P2P mode**. If a scraper addon resolves links itself (because a Debrid key was entered into it), Nuvio never sees a hash to wrap, and your TorBox/Premiumize linking in Steps 1-2 is effectively bypassed.
 
-#### Configuring AIOStreams for P2P
+#### Instant P2P Setup Generator
+
+<P2PGenerator />
+
+> [!TIP]
+> The generator above resolves the full **Tam-Taro Complete SEL (TAMS)** template for P2P mode — no debrid services, P2P set to Required, debrid stream types excluded, and a curated set of P2P scrapers. It can either download a config JSON to import, or push straight to your instance to produce a manifest URL you paste into Nuvio. Use **Simple mode** for recommended defaults, or switch to **Advanced mode** for full control.
+
+#### Configuring AIOStreams for P2P (Manual)
 1. **Pick an instance.** Open the configuration page of the AIOStreams instance you intend to use (a self-hosted instance, or a public instance that explicitly allows P2P). The official public ElfHosted instance disables P2P and HTTP streams by default for liability reasons, so it will not work for this setup — you'll need a private/self-hosted instance or an alternate public instance that permits P2P.
 2. **Skip the Services menu.** Click through to the **Services** menu and leave it empty — do not add or enable credentials for TorBox, Premiumize, Real-Debrid, or any other debrid service here. Entering a key in AIOStreams itself causes it to return already-resolved/cached debrid links instead of raw P2P hashes, which both defeats Nuvio's own resolution logic and can burn through your provider's rate limits outside of Nuvio's control.
 3. **Enable P2P in Stream Types / Filters.** Navigate to the Stream Types (or Filters) menu and make sure **P2P** is toggled on and set to at least **Preferred**, ideally **Required**. In the same menu, disable or exclude **Cached** and **Uncached** debrid stream types so AIOStreams only returns magnet results.

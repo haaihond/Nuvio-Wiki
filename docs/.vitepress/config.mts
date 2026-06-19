@@ -231,6 +231,15 @@ export default defineConfig({
   },
 
   vite: {
+    server: {
+      proxy: {
+        '/api/aiostreams': {
+          target: 'https://aiostreamsfortheweebsstable.midnightignite.me',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api\/aiostreams/, '/api/v1')
+        }
+      }
+    },
     esbuild: {
       target: 'esnext'
     },
