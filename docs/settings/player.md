@@ -44,6 +44,8 @@ Nuvio allows you to submit timestamps to IntroDB's community-sourced database. Y
 - **Content Warnings:** Show parental guidance overlay when playback starts.
 - **Automatic Skipping:** Choose which segments (intros/outros) skip automatically without prompting.
 
+[Back to top](#nuvio-player-settings)
+
 ---
 
 ## Stream Selection and Stream Auto Play
@@ -83,6 +85,8 @@ These configurations control exactly which addons or plugins are allowed to sear
 - **Allowed Plugins:** Controls the plugins used during the search process.
   - *Options:* All enabled plugins, Custom Selection.
 
+[Back to top](#nuvio-player-settings)
+
 ---
 
 ## Next Episode
@@ -98,6 +102,8 @@ The Next Episode category includes several settings to optimize continuous viewi
   - *At 100%:* Nuvio will not begin the source selection process until the media is completely finished.
   - *At 97%:* Nuvio will begin the source selection process when the media is 97% complete (e.g., for a 30-minute show, selection begins at 29 minutes and 6 seconds).
 - **Are You Still Watching?** [Android TV Only]: Prompts the user after a set number of consecutive auto-played episodes to prevent infinite playback if you fall asleep.
+
+[Back to top](#nuvio-player-settings)
 
 ---
 
@@ -127,6 +133,8 @@ Controls how aggressively Nuvio searches for external subtitles when a video beg
 - **Fast startup:** Prioritizes immediate video playback by skipping the automatic fetch of external addon subtitles. You must manually request them from within the player.
 - **Preferred only:** A balanced approach. Fetches subtitles from addons during the initial load, but only pulls those matching your language preferences.
 - **All subtitles:** Fetches and loads every available addon subtitle for the video, maximizing choice at the cost of slightly longer loading times.
+
+[Back to top](#nuvio-player-settings)
 
 ---
 
@@ -168,6 +176,8 @@ Technical settings that determine how your device's hardware and software proces
   - Older optical audio cables (the ones with the glowing red light) have a strict bandwidth limit. They physically cannot transmit heavy, modern, uncompressed audio formats like TrueHD or DTS-HD. They max out at standard Dolby Digital 5.1 (also known as AC-3).
   - If you have an older AV receiver or soundbar hooked up to your TV via an optical cable, trying to play a modern 4K movie with a TrueHD track will result in dead silence or horrible static. This setting acts as a live translator. It grabs the heavy modern audio and instantly crushes it down into standard Dolby Digital 5.1 on the fly, ensuring your older sound system can actually play the movie.
 
+[Back to top](#nuvio-player-settings)
+
 ---
 
 ## Buffer and Network [Android TV Only]
@@ -193,6 +203,8 @@ Overrides Media3's default buffering with custom values. When off, the player us
 - **Custom Network:** Commands the download client to forge multiple parallel connections to fetch progressive streams (instead of a single connection) to maximize high-bandwidth networks.
 - **P2P Streaming:** Enables or restricts direct processing configurations for raw peer-to-peer (torrent) streams.
 - **Hide torrent stats:** Suppresses real-time peer connection logs, seed counts, and download speed overlays from appearing during loading and playback.
+
+[Back to top](#nuvio-player-settings)
 
 ---
 
@@ -232,3 +244,6 @@ The MPV configuration in Nuvio currently focuses on **Hardware Decoding**. This 
 > This option can cause the player to lag if you do not have sufficient resources to decode the video. Weaker Android TV boxes can struggle with this option.
 
 - **For Troubleshooting:** If a specific video file is playing with a green screen, distorted colors, or just audio with no picture, change this to **Disabled (no)**. Forcing software decoding will usually bypass hardware incompatibilities and allow the file to play.
+
+[Back to top](#nuvio-player-settings)
+
