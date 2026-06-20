@@ -4,6 +4,9 @@ Nuvio supports a modular integration system designed to handle link resolution, 
 
 This directory contains the documentation for configuring and optimizing all external services supported by Nuvio.
 
+>[!NOTE]
+>Reminder: This project is not official. Do not contact Nuvio developers regarding issues with this wiki.
+
 ---
 
 ## Integration Categories
