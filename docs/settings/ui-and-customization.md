@@ -16,7 +16,7 @@ Whether you are swiping through catalogs on a phone or navigating with a remote 
 * **OLED/AMOLED Settings:** Granular control is available — enable *AMOLED Mode* for the background layer, and separately toggle *Pure Black Surfaces* for interactive elements like cards, panels, and containers.
 * **Typography:** Adjust the *App Font* (e.g., Inter) to optimize legibility for large-screen reading.
 
-[Back to top](#cross-platform-ui-customization-guide)
+[Back to top](#Cross-platform-ui-customization-guide)
 
 ---
 
