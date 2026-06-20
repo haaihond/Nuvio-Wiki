@@ -1,7 +1,5 @@
 # Content Enrichment & Tracking Guide
 
----
-
 ### TMDB Enrichment
 
 TMDB (The Movie Database) acts as the foundation for your metadata, pulling in high-quality artwork, episode details, and cast information.
