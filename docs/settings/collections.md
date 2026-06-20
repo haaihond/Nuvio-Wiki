@@ -4,15 +4,7 @@
 > [!CAUTION]
 > Creating collections should be considered an advanced user feature (seriously, this is a warning). If you don't consider yourself an advanced user, it's recommended to copy one from [Nuvio's community collections](https://nuvio.tv/community-collections) instead.
 
-### Contents
-
-- [Understanding Collection Structure](#understanding-collection-structure)
-- [Before You Start](#before-you-start)
-- [Creating Your First Collection](#creating-your-first-collection)
-- [The Folders Tab](#the-folders-tab)
-  - [Add Catalog](#add-catalog)
-  - [Add TMDB](#add-tmdb)
-  - [Add Trakt](#add-trakt)
+---
 
 ### Understanding Collection Structure
 
