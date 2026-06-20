@@ -1,4 +1,4 @@
-# Nuvio Wiki: Cross-Platform UI & Customization Guide
+# Cross-Platform UI & Customization Guide
 
 Whether you are swiping through catalogs on a phone or navigating with a remote on the couch, Nuvio offers deep customization to tailor your streaming environment. This guide breaks down how to configure visual elements, organize your media, and adjust playback navigation across both the Mobile and TV applications.
 
@@ -15,6 +15,8 @@ Whether you are swiping through catalogs on a phone or navigating with a remote 
 ### TV App
 * **OLED/AMOLED Settings:** Granular control is available — enable *AMOLED Mode* for the background layer, and separately toggle *Pure Black Surfaces* for interactive elements like cards, panels, and containers.
 * **Typography:** Adjust the *App Font* (e.g., Inter) to optimize legibility for large-screen reading.
+
+[Back to top](#cross-platform-ui-customization-guide)
 
 ---
 
@@ -39,6 +41,8 @@ Whether you are swiping through catalogs on a phone or navigating with a remote 
 * **Home Screen Trailers:** Enable *Autoplay Trailer* to automatically play previews for focused content when available directly on the home screen.
 * **Catalog Details:** A *Show Catalog Type* option displays Movie/Series suffixes next to titles.
 
+[Back to top](#cross-platform-ui-customization-guide)
+
 ---
 
 ## 3. Detail Page & Metadata Formatting
@@ -59,6 +63,8 @@ For metadata enrichment, ratings, see the [TMDb, MDblist, Trakt integration Guid
 * **Trailers:** Manage *Auto-play Trailers* to start previews after a period of inactivity on the detail page, or toggle a dedicated *Show Trailer Button* if you prefer manual control.
 * **Data Formatting:** Toggle the *Show full release date* option to see the exact premiere day instead of just the release year.
 
+[Back to top](#cross-platform-ui-customization-guide)
+
 ---
 
 ## 4. "Continue Watching" & Up Next Behavior
@@ -77,6 +83,8 @@ For metadata enrichment, ratings, see the [TMDb, MDblist, Trakt integration Guid
 ### TV App
 *(Continue Watching cards on TV automatically adapt to match your chosen Home Layout View).*
 
+[Back to top](#cross-platform-ui-customization-guide)
+
 ---
 
 ### Platform Comparison Quick Reference
@@ -91,4 +99,6 @@ For metadata enrichment, ratings, see the [TMDb, MDblist, Trakt integration Guid
 | **Sidebar Navigation** | Bottom/Hamburger tab menu | Floating Modern Sidebar (Collapsible) |
 | **Detail Page Layout** | Reorderable UI sections & tabs | External Metadata toggles & Auto-Play trailers |
 | **Continue Watching** | Selectable Card, Wide, or Poster styles | Automatically adapts to chosen Home Layout View |
+
+[Back to top](#cross-platform-ui-customization-guide)
 
