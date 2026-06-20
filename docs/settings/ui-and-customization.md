@@ -41,7 +41,7 @@ Whether you are swiping through catalogs on a phone or navigating with a remote 
 * **Home Screen Trailers:** Enable *Autoplay Trailer* to automatically play previews for focused content when available directly on the home screen.
 * **Catalog Details:** A *Show Catalog Type* option displays Movie/Series suffixes next to titles.
 
-[Back to top](#cross-platform-ui-customization-guide)
+[Back to top](#Cross-platform-ui-customization-guide)
 
 ---
 
@@ -63,7 +63,7 @@ For metadata enrichment, ratings, see the [TMDb, MDblist, Trakt integration Guid
 * **Trailers:** Manage *Auto-play Trailers* to start previews after a period of inactivity on the detail page, or toggle a dedicated *Show Trailer Button* if you prefer manual control.
 * **Data Formatting:** Toggle the *Show full release date* option to see the exact premiere day instead of just the release year.
 
-[Back to top](#cross-platform-ui-customization-guide)
+[Back to top](#Cross-platform-ui-customization-guide)
 
 ---
 
@@ -83,7 +83,7 @@ For metadata enrichment, ratings, see the [TMDb, MDblist, Trakt integration Guid
 ### TV App
 *(Continue Watching cards on TV automatically adapt to match your chosen Home Layout View).*
 
-[Back to top](#cross-platform-ui-customization-guide)
+[Back to top](#Cross-platform-ui-customization-guide)
 
 ---
 
@@ -100,5 +100,5 @@ For metadata enrichment, ratings, see the [TMDb, MDblist, Trakt integration Guid
 | **Detail Page Layout** | Reorderable UI sections & tabs | External Metadata toggles & Auto-Play trailers |
 | **Continue Watching** | Selectable Card, Wide, or Poster styles | Automatically adapts to chosen Home Layout View |
 
-[Back to top](#cross-platform-ui-customization-guide)
+[Back to top](#Cross-platform-ui-customization-guide)
 
