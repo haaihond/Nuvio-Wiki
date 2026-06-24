@@ -3,7 +3,7 @@
 ---
 # Contributing to the Nuvio Wiki
 
-Thank you for wanting to improve this community resource! Since this is an unofficial project, your help is vital.
+Thank you for wanting to improve this community resource! Since this is an unofficial project, your help is vital!
 
 ## How to Help
 - **Report Inaccuracies:** If a setup step is outdated, open an issue.
