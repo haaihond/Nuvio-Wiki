@@ -1,4 +1,4 @@
-# 🛠️ Troubleshooting Guide
+# Troubleshooting Guide
 
 Find solutions to common issues with Nuvio below.
 
