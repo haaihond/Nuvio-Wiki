@@ -60,6 +60,9 @@ function buildNav(locale: WikiLocale): DefaultTheme.NavItem[] {
 function cleanSidebarLinks(items: any[] | undefined) {
   if (!items) return
   for (const item of items) {
+    if (item.text) {
+      item.text = item.text.replace(/\[[^\]]*\]/g, '').trim()
+    }
     if (item.link) {
       if (item.link.endsWith('/index.md')) {
         item.link = item.link.slice(0, -'/index.md'.length)
