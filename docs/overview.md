@@ -41,8 +41,8 @@ Nuvio operates on a modular architecture using **Addons**. By itself, Nuvio is a
 
 - **Cross-Platform:** Available on Android (Mobile & TV) and iOS.
 - **Unified Search:** Search across all installed addons simultaneously.
-- **Profiles:** Add profiles to keep everything separate
-- **Intro/Outro Skip:** Uses introDB to skip intros and outros
+- **Profiles:** Add profiles to keep everything separate.
+- **Intro/Outro Skip:** Uses introDB to skip intros and outros.
 - **Auto Source Select:** Automatically plays a file based on your settings. No input needed.
 - **Trakt Integration:** Sync your watch history and lists.
 - **Customizable UI:** Themes and layout options to suit your device.

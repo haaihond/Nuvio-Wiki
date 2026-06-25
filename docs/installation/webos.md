@@ -18,7 +18,7 @@ The official installer provides a simplified way to deploy Nuvio directly to you
 ### 2. Run the Nuvio Installer
   - Download and run the latest `Nuvio-WebTV-Installer` from the [Official Nuvio Releases](https://github.com/NuvioMedia/NuvioWeb/releases/latest).
     - *(macOS users: If the app is blocked, move it to Applications and run `xattr -dr com.apple.quarantine "/Applications/Nuvio WebTV Installer.app"` and `codesign --force --deep --sign - "/Applications/Nuvio WebTV Installer.app"` in the terminal).*
-    - *windows users: If the app is blocked, click on more then run anyway*
+    - *Windows users: If the app is blocked, click on "More info" then "Run anyway"*
   - Select **LG WebOS** on the "Select your TV OS" screen.
   - Choose **Simple Installation (Recommended)** to automatically fetch the latest release from GitHub.
   - On the configuration screen, enter your **TV IP Address**.
@@ -57,7 +57,7 @@ The **webOS Homebrew Channel** acts as an unofficial app store directly on your 
   - Nuvio will now appear in your standard webOS app menu.
 
 >[!TIP]
-> LG Developer Mode sessions expire (usually after 999 hours). If the timer runs out, the Homebrew Channel and Nuvio will fail to launch. To prevent this enable the background auto-renew feature built into webOS Dev Manager on your PC.
+> LG Developer Mode sessions expire (usually after 999 hours). If the timer runs out, the Homebrew Channel and Nuvio will fail to launch. To prevent this, enable the background auto-renew feature built into webOS Dev Manager on your PC.
 
 ---
 

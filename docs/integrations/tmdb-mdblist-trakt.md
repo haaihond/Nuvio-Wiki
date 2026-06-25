@@ -7,7 +7,7 @@ TMDB (The Movie Database) acts as the foundation for your metadata, pulling in h
 **How to obtain a TMDB API Key:**
 1. Create a free account at [themoviedb.org](https://www.themoviedb.org/).
 2. Navigate to your Account Settings and select the API link from the left sidebar.
-3. Request an API Key and select **Yes this is for personal use**.
+3. Request an API Key and select **Yes, this is for personal use**.
 4. Fill out the form.
 5. Copy the v3 API Key provided (do not use the v4 Read Access Token for this field).
 

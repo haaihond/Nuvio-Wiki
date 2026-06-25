@@ -93,7 +93,7 @@ A fast-growing service that excels in Usenet support (pro tier only) alongside t
 * **Pros:** No limit on IP usage, Native Usenet support (pro tier), fast caching, modern API.
 * **Cons:** Newer service, can have stability issues.
 * **Plans & Pricing:** 
-  * **Essential:** ~$3.00/month or ~$33.00/year: Recommend for most users
+  * **Essential:** ~$3.00/month or ~$33.00/year: Recommended for most users
   * **Standard:** ~$5.00/month or ~$55.00/year
   * **Pro:** ~$10.00/month or ~$110.00/year: Provides access to Usenet
 * **Deals & Discounts:** Users can receive a referral bonus on their first purchase, adding 7 days of extra free time per month purchased. Annual plans combined with coupon codes and cryptocurrency payments can significantly lower the monthly equivalent cost. Torbox typically offers Black Friday sales for 30% off. 
@@ -125,7 +125,7 @@ Uses PM Cache but without the extra PM services.
 #### 4. Real-Debrid (RD)
 
 > [!WARNING]
-> Real Debrid has recently faced legal issues and a large amount of files are now being blocked. Your mileage may vary based on usage of this service.
+> Real-Debrid has recently faced legal issues and a large number of files are now being blocked. Your mileage may vary based on usage of this service.
 
 * **Pros:** Affordable, high-speed servers.
 * **Cons:** Strict 1 IP rule (cannot use on two different internet connections at once), varying blocking of content.

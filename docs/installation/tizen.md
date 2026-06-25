@@ -18,7 +18,7 @@ The official installer automates package downloading and certificate generation,
 ### 2. Run the Nuvio Installer
   - Download and run the latest `Nuvio-WebTV-Installer` from the [Official Nuvio Releases](https://github.com/NuvioMedia/NuvioWeb/releases/latest).
     - *macOS users: If the app is blocked, move it to Applications and run `xattr -dr com.apple.quarantine "/Applications/Nuvio WebTV Installer.app"` and `codesign --force --deep --sign - "/Applications/Nuvio WebTV Installer.app"` in the terminal.*
-    - *windows users: If the app is blocked, click on more then run anyway*
+    - *Windows users: If the app is blocked, click on "More info" then "Run anyway"*
   - Select **Samsung Tizen** on the "Select your TV OS" screen.
   - Choose **Simple Installation (Recommended)** to automatically fetch the latest release.
   - On the configuration screen, enter your **TV IP Address**.
