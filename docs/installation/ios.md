@@ -17,7 +17,7 @@ Nuvio on iOS typically requires **Sideloading** (AltStore/Sideloadly). Apple all
 
 4. Load the IPA file
    
-    - Open Sideloadly on your computer. Drag and drop your downloaded [.ipa file](https://github.com/luqmanfadlli/NuvioMobile-iOS/releases/download/0.2.9/Nuvio-v0.2.9-Full.ipa) directly into the Sideloadly window, or click the IPA icon on the left to browse your computer for the file.
+    - Open Sideloadly on your computer. Drag and drop your downloaded [.ipa file](https://github.com/luqmanfadlli/NuvioMobile-iOS/releases/download/0.2.13/Nuvio-v0.2.13-Full.ipa) directly into the Sideloadly window, or click the IPA icon on the left to browse your computer for the file.
     
 5. Enter Apple ID and Start:
    
@@ -54,6 +54,6 @@ Nuvio on iOS typically requires **Sideloading** (AltStore/Sideloadly). Apple all
     - Scroll to the bottom and tap Developer Mode. Toggle it on, and your phone will restart to apply the change.
       
 6. Sideload the IPA file
-    - Download the [.ipa file](https://github.com/luqmanfadlli/NuvioMobile-iOS/releases/download/0.2.9/Nuvio-v0.2.9-Full.ipa) using Safari on your iPhone. 
+    - Download the [.ipa file](https://github.com/luqmanfadlli/NuvioMobile-iOS/releases/download/0.2.13/Nuvio-v0.2.13-Full.ipa) using Safari on your iPhone. 
     - Open the new AltStore app on your home screen
     - Go to the My Apps tab, tap the + icon in the top left, and select your downloaded .ipa file to install it.

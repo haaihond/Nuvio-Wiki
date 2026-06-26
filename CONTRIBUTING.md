@@ -9,7 +9,7 @@ Thank you for wanting to improve this community resource! Since this is an unoff
 - **Report Inaccuracies:** If a setup step is outdated, open an issue.
 - **Add Guides:** If you use Nuvio on a platform not covered (like Firestick or specific Android boxes), feel free to submit a guide.
 - **Clarify FAQ:** Help us answer common community questions.
-- **Translate the Wiki:** Follow the [Translation Guide](TRANSLATING.md) to add or maintain a language without moving the English docs.
+- **Translate the Wiki:** Follow the [Translation Guide](TRANSLATING.md) to add or maintain a language without changing the English docs.
 
 ## Style Guide
 - Use clear, step-by-step instructions.
