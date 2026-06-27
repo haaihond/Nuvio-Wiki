@@ -270,6 +270,10 @@ export default defineConfig({
           target: 'https://aiostreamsfortheweebsstable.midnightignite.me',
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api\/aiostreams/, '/api/v1')
+        },
+        '/api/ai': {
+          target: 'http://localhost:3001',
+          changeOrigin: true
         }
       }
     },
