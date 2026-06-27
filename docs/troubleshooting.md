@@ -3,7 +3,7 @@
 Find solutions to common issues with Nuvio below. Problems are grouped by category — jump to the section most relevant to your situation.
 
 > [!TIP]
-> Before diving into specific fixes, try the most common quick fixes first: **restart the app**, **clear the apps cache**, **check your internet connection**, and **verify your Debrid subscription is active**. These resolve the majority of reported issues.
+> Before diving into specific fixes, try the most common quick fixes first: **restart the app**, **clear the app's cache**, **check your internet connection**, and **verify your Debrid subscription is active**. These resolve the majority of reported issues.
 
 ---
 
@@ -163,7 +163,7 @@ Some addons (e.g., AIOStreams) require specific configuration tied to your Debri
 > [!WARNING]
 > Do not share your addon manifest URL publicly — it typically contains your Debrid API key or account token.
 
-**Step 6 - Addon Returns No Results
+**Step 6 — Addon Returns No Results**
 
 If an addon is installed and enabled but never returns streams:
 
@@ -219,7 +219,7 @@ This error occurs during installation and usually has one of two causes.
 
 **Cause 1 — Wrong APK version**
 
-Nuvio has separate builds for different device types. Installing the wrong version triggers this error. Note that AndroidTV also needs to verify if it is the correct version
+Nuvio has separate builds for different device types. Installing the wrong version triggers this error. Note that Android TV also needs to verify if it is the correct version.
 
 - **Android phones/tablets:** Use the **Mobile** APK. See the [Android Mobile Installation Guide](installation/android-mobile.md).
 - **Android TV, Fire TV, Google TV:** Use the **TV** APK. See the [Android TV Installation Guide](installation/android-tv.md).
@@ -345,7 +345,7 @@ After a Nuvio update, addon configurations are sometimes reset.
 
 ---
 
-### 4.4 Addon Loads Slowly
+### 4.3 Addon Loads Slowly
 
 Slow addon responses extend the time it takes for the stream list to appear.
 
@@ -408,7 +408,7 @@ VPNs are a common source of intermittent connectivity and playback issues.
 
 If streams load but are consistently slow regardless of content:
 
-**Step1 - Test Internet
+**Step 1 — Test Internet**
 - Run a speed test from the same device. If your measured speed is much lower than your subscribed plan, the issue is your ISP or local network, not Nuvio.
 - Check whether your ISP throttles video streaming traffic. A VPN may help in this case (test with and without).
 - Switch from Wi-Fi to a wired Ethernet connection where possible, particularly on TV devices.
