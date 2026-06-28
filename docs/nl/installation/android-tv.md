@@ -13,7 +13,7 @@ Net als op Android Mobiel zijn er twee manieren om Nuvio op Android TV te instal
     - **Gebruik de Downloader-app uit de Play Store:**
         - Open de Downloader-app vanaf je startscherm.
         - Indien gevraagd, selecteer Toestaan (Allow) zodat de app bestanden op je apparaat kan opslaan.
-        - Selecteer het URL-/zoekvak op het tabblad Home en typ exact de code: 1456465
+        - Selecteer het URL-/zoekvak op het tabblad Home en typ exact de code: 4728718
     - De Downloader-app zal doorverwijzen en automatisch de Nuvio TV APK downloaden. Klik op Installeren (Install) wanneer de melding verschijnt. Selecteer na afloop Gereed (Done) in plaats van Openen.
     - Druk ten slotte twee keer op Verwijderen (Delete) in de Downloader-app om het installatiebestand te verwijderen en opslagruimte op je TV te besparen.
 

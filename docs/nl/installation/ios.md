@@ -15,7 +15,7 @@ Nuvio op iOS vereist doorgaans **Sideloading** (AltStore/Sideloadly). Apple staa
     - Ontgrendel je telefoon en tik op Vertrouw deze computer als hierom wordt gevraagd.
 
 4. **Laad het IPA-bestand:**
-    - Open Sideloadly op je computer. Sleep het gedownloade [.ipa-bestand](https://github.com/luqmanfadlli/NuvioMobile-iOS/releases/download/0.2.9/Nuvio-v0.2.9-Full.ipa) rechtstreeks naar het Sideloadly-venster, of klik op het IPA-pictogram aan de linkerkant om naar het bestand op je computer te zoeken.
+    - Open Sideloadly op je computer. Sleep het gedownloade [.ipa-bestand](https://github.com/luqmanfadlli/NuvioMobile-iOS/releases/download/0.2.13/Nuvio-v0.2.13-Full.ipa) rechtstreeks naar het Sideloadly-venster, of klik op het IPA-pictogram aan de linkerkant om naar het bestand op je computer te zoeken.
     
 5. **Voer Apple ID in en start:**
     - Typ het e-mailadres van je Apple ID in het daarvoor bestemde vak. 
@@ -51,6 +51,6 @@ Nuvio op iOS vereist doorgaans **Sideloading** (AltStore/Sideloadly). Apple staa
     - Scrol naar de onderkant en tik op Developer Mode. Schakel dit in, waarna je telefoon opnieuw wordt opgestart om de wijziging toe te passen.
       
 6. **Sideload het IPA-bestand:**
-    - Download het [.ipa-bestand](https://github.com/luqmanfadlli/NuvioMobile-iOS/releases/download/0.2.9/Nuvio-v0.2.9-Full.ipa) met behulp van Safari op je iPhone. 
+    - Download het [.ipa-bestand](https://github.com/luqmanfadlli/NuvioMobile-iOS/releases/download/0.2.13/Nuvio-v0.2.13-Full.ipa) met behulp van Safari op je iPhone. 
     - Open de nieuwe AltStore-app op je startscherm.
     - Ga naar het tabblad My Apps, tik op het +-pictogram in de linkerbovenhoek en selecteer het gedownloade .ipa-bestand om het te installeren.
