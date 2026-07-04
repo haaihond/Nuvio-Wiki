@@ -385,7 +385,7 @@ async function submitSetup() {
               <path d="M5 8V6a5 5 0 0 1 10 0v2"></path>
               <rect x="3" y="8" width="14" height="10" rx="3"></rect>
             </svg>
-            {{ t.keysSecureNote }}
+            <span class="secure-note-text">{{ t.keysSecureNote }}</span>
           </span>
           <svg viewBox="0 0 20 20" aria-hidden="true" class="summary-arrow" :class="{ rotated: !isCollapsed }">
             <path d="m6 8 4 4 4-4"></path>
@@ -1652,5 +1652,84 @@ async function submitSetup() {
   font-family: var(--vp-font-family-mono);
   font-size: 11px;
   color: #fbbf24;
+}
+
+/* Prevent text overlapping with absolute buttons/toggles */
+.input-container input:has(+ .password-toggle) {
+  padding-right: 44px;
+}
+
+.input-container input:has(+ .text-btn-action) {
+  padding-right: 96px;
+}
+
+/* Mobile responsive styles */
+@media (max-width: 480px) {
+  .nuvio-quickstart {
+    padding: 16px 14px;
+    margin: 12px 0 20px 0;
+  }
+  
+  .nuvio-quickstart.is-expanded {
+    padding: 18px 14px;
+  }
+
+  .qs-header {
+    gap: 8px;
+  }
+
+  .qs-brand-text {
+    font-size: 13px;
+  }
+
+  .secure-note-text {
+    display: none;
+  }
+
+  .secure-note {
+    gap: 0;
+  }
+
+  .torbox-callout {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    text-align: center;
+    padding: 14px;
+  }
+
+  .callout-link {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .result-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .result-actions .btn-primary,
+  .result-actions .btn-secondary {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .cred-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    padding: 10px 12px;
+  }
+
+  .cred-value {
+    text-align: left;
+    width: 100%;
+  }
+
+  .copy-btn {
+    padding: 0 12px;
+    font-size: 11px;
+  }
 }
 </style>
