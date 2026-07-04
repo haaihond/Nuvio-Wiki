@@ -165,6 +165,7 @@ Rules:
 
 // ── Express app ─────────────────────────────────────────────────────────
 const app = express();
+app.set('trust proxy', true);
 
 app.use(cors({
   origin: ALLOWED_ORIGIN,
