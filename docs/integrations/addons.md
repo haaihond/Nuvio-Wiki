@@ -1,6 +1,6 @@
 # Addons
 
-Addons are the heart of the Nuvio experience. They provide the content, metadata, subtitles, and functionality that make the app useful. While Nuvio's [plugin](../plugins) system runs scraper Javascript directly on your device, addons are remote web services that communicate with Nuvio using the standard Stremio addon protocol. Nuvio also has its own native debrid integration — a built-in system that resolves torrent hashes through your debrid account without needing an external addon to do it.
+Addons are the heart of the Nuvio experience. They provide the content, metadata, subtitles, and functionality that make the app useful. While Nuvio's [plugin](plugins.md) system runs scraper Javascript directly on your device, addons are remote web services that communicate with Nuvio using the standard Stremio addon protocol. Nuvio also has its own native debrid integration — a built-in system that resolves torrent hashes through your debrid account without needing an external addon to do it.
 
 >[!WARNING]
 > This Wiki does not condone the use of any unlicensed copyrighted material.
