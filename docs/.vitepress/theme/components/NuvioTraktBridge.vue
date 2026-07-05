@@ -724,9 +724,11 @@ async function resolveEpisodeMapping(mapper: any, params: any, isExport = false)
   if (episodeMappingCache.has(cacheKey)) return episodeMappingCache.get(cacheKey)
 
   try {
-    const addonEpisodes = await getAddonEpisodes(params.contentId, params.contentType, mapper)
     const showLookupId = params.imdb || params.contentId.replace(/^(trakt|tmdb):/, '')
-    const traktEpisodes = await getTraktEpisodes(showLookupId, mapper)
+    const [addonEpisodes, traktEpisodes] = await Promise.all([
+      getAddonEpisodes(params.contentId, params.contentType, mapper),
+      getTraktEpisodes(showLookupId, mapper)
+    ])
 
     if (addonEpisodes.length && traktEpisodes.length) {
       if (isExport) {
@@ -847,7 +849,7 @@ async function buildSyncPlan(isPreviewOnly = false) {
       logLine('Fetching Trakt watched movies & shows...')
       const [movies, shows] = await Promise.all([
         traktRequestAll('/sync/watched/movies'),
-        traktRequestAll('/sync/watched/shows')
+        traktRequestAll('/sync/watched/shows', { extended: 'progress' })
       ])
 
       // Movies
