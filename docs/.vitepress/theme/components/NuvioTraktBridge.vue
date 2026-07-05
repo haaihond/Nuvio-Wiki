@@ -400,6 +400,37 @@ async function traktRequest(path: string, params: Record<string, any> = {}, fetc
   })
 }
 
+async function traktRequestAll(path: string, params: Record<string, any> = {}, fetchOptions: RequestInit = {}) {
+  let page = 1
+  const limit = 250
+  const allData: any[] = []
+
+  while (true) {
+    const res = await traktRequest(path, { ...params, page, limit }, fetchOptions)
+    if (!res || !res.data) {
+      break
+    }
+
+    if (Array.isArray(res.data)) {
+      allData.push(...res.data)
+      const pageCountHeader = res.headers.get('X-Pagination-Page-Count') || res.headers.get('x-pagination-page-count')
+      if (pageCountHeader) {
+        const totalPages = parseInt(pageCountHeader, 10)
+        if (isNaN(totalPages) || page >= totalPages) {
+          break
+        }
+        page++
+      } else {
+        break
+      }
+    } else {
+      return res
+    }
+  }
+
+  return { data: allData }
+}
+
 // --- Nuvio Sync Flow ---
 async function signInNuvio() {
   if (!nuvioForm.email.trim() || !nuvioForm.password) {
@@ -794,8 +825,8 @@ async function buildSyncPlan(isPreviewOnly = false) {
     if (state.options.syncHistory) {
       logLine('Fetching Trakt watched movies & shows...')
       const [movies, shows] = await Promise.all([
-        traktRequest('/sync/watched/movies'),
-        traktRequest('/sync/watched/shows')
+        traktRequestAll('/sync/watched/movies'),
+        traktRequestAll('/sync/watched/shows')
       ])
 
       // Movies
@@ -847,7 +878,7 @@ async function buildSyncPlan(isPreviewOnly = false) {
 
     if (state.options.syncProgress) {
       logLine('Fetching Trakt playback progress...')
-      const pb = await traktRequest('/sync/playback')
+      const pb = await traktRequestAll('/sync/playback')
       for (const p of (Array.isArray(pb.data) ? pb.data : [])) {
         const progressVal = Number(p.progress)
         if (isNaN(progressVal) || progressVal <= 0) continue
@@ -907,12 +938,12 @@ async function buildSyncPlan(isPreviewOnly = false) {
       const items = [] as any[]
       if (state.options.syncWatchlist) {
         logLine('Fetching Trakt watchlist...')
-        const wl = await traktRequest('/users/me/watchlist')
+        const wl = await traktRequestAll('/users/me/watchlist')
         items.push(...(Array.isArray(wl.data) ? wl.data.map(i => ({ ...i, _src: 'watchlist' })) : []))
       }
       if (state.options.syncCollection) {
         logLine('Fetching Trakt collection...')
-        const col = await traktRequest('/sync/collection')
+        const col = await traktRequestAll('/sync/collection')
         items.push(...(Array.isArray(col.data) ? col.data.map(i => ({ ...i, _src: 'collection' })) : []))
       }
 
