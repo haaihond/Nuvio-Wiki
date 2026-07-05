@@ -266,6 +266,13 @@
 
   .nuvio-mobile-drawer__items {
     position: relative;
+    display: grid;
+    grid-template-rows: 1fr;
+    overflow: hidden;
+  }
+
+  .nuvio-mobile-drawer__items-inner {
+    min-height: 0;
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -607,7 +614,9 @@
   .nuvio-mobile-drawer-enter-active,
   .nuvio-mobile-drawer-leave-active,
   .nuvio-mobile-backdrop-enter-active,
-  .nuvio-mobile-backdrop-leave-active {
+  .nuvio-mobile-backdrop-leave-active,
+  .expand-enter-active,
+  .expand-leave-active {
     transition: none !important;
   }
 }

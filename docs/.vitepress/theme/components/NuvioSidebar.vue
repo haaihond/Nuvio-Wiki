@@ -132,6 +132,11 @@ watch(
   () => {
     collapsed.value = frontmatter.value.layout === 'home'
     syncRootState()
+    sections.value.forEach((section) => {
+      if (isCurrent(section.link) || containsCurrent(section.items)) {
+        expanded.add(section.key)
+      }
+    })
   },
   { immediate: true }
 )
@@ -268,35 +273,39 @@ onBeforeUnmount(() => {
         >
           <span>{{ section.text }}</span>
           <svg :class="{ 'is-open': expanded.has(section.key) }" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="m9 10 3 3 3-3" />
+            <path d="m9 18 6-6-6-6" />
           </svg>
         </button>
 
-        <div v-show="expanded.has(section.key)" class="nuvio-sidebar__section-items">
-          <template v-for="item in section.items" :key="item.link || item.text">
-            <a
-              v-if="item.link"
-              class="nuvio-sidebar__link"
-              :class="{ 'is-active': isCurrent(item.link) }"
-              :href="withBase(item.link)"
-              :aria-current="isCurrent(item.link) ? 'page' : undefined"
-            >
-              {{ item.text }}
-            </a>
-            <p v-else class="nuvio-sidebar__subheading">{{ item.text }}</p>
+        <Transition name="expand">
+          <div v-show="expanded.has(section.key)" class="nuvio-sidebar__section-items">
+            <div class="nuvio-sidebar__section-items-inner">
+              <template v-for="item in section.items" :key="item.link || item.text">
+                <a
+                  v-if="item.link"
+                  class="nuvio-sidebar__link"
+                  :class="{ 'is-active': isCurrent(item.link) }"
+                  :href="withBase(item.link)"
+                  :aria-current="isCurrent(item.link) ? 'page' : undefined"
+                >
+                  {{ item.text }}
+                </a>
+                <p v-else class="nuvio-sidebar__subheading">{{ item.text }}</p>
 
-            <a
-              v-for="child in item.items || []"
-              :key="child.link || child.text"
-              class="nuvio-sidebar__link nuvio-sidebar__link--nested"
-              :class="{ 'is-active': isCurrent(child.link) }"
-              :href="child.link ? withBase(child.link) : undefined"
-              :aria-current="isCurrent(child.link) ? 'page' : undefined"
-            >
-              {{ child.text }}
-            </a>
-          </template>
-        </div>
+                <a
+                  v-for="child in item.items || []"
+                  :key="child.link || child.text"
+                  class="nuvio-sidebar__link nuvio-sidebar__link--nested"
+                  :class="{ 'is-active': isCurrent(child.link) }"
+                  :href="child.link ? withBase(child.link) : undefined"
+                  :aria-current="isCurrent(child.link) ? 'page' : undefined"
+                >
+                  {{ child.text }}
+                </a>
+              </template>
+            </div>
+          </div>
+        </Transition>
       </section>
     </nav>
 

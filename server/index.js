@@ -163,6 +163,17 @@ Rules:
 8. When listing steps, use numbered lists for clarity.
 9. Every retrieved document identifies its WIKI PAGE route. Use that exact route for internal markdown links.`;
 
+/** Helper to generate the Trakt redirect URI dynamically, enforcing HTTPS in production. */
+function getRedirectUri(req) {
+  const host = req.get('host') || '';
+  const isLocalhost = host.includes('localhost') || host.includes('127.0.0.1');
+  const protocol = isLocalhost ? req.protocol : 'https';
+  const uri = `${protocol}://${host}/api/trakt/callback`;
+  console.log(`[Trakt API] Generated redirect URI: ${uri}`);
+  return uri;
+}
+
+
 // ── Express app ─────────────────────────────────────────────────────────
 const app = express();
 app.set('trust proxy', true);
@@ -276,7 +287,7 @@ app.post('/api/trakt/login-url', async (req, res) => {
     const stateParam = `${stateValue}:${Buffer.from(returnOrigin).toString('base64')}`;
     
     // We construct the redirect_uri dynamically based on the current host
-    const redirectUri = `${req.protocol}://${req.get('host')}/api/trakt/callback`;
+    const redirectUri = getRedirectUri(req);
     const url = `https://trakt.tv/oauth/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(stateParam)}`;
 
     res.json({ url, state: stateParam, client_id: clientId });
@@ -311,7 +322,7 @@ app.get('/api/trakt/callback', async (req, res) => {
       console.error('Failed to decode return_origin:', e);
     }
 
-    const redirectUri = `${req.protocol}://${req.get('host')}/api/trakt/callback`;
+    const redirectUri = getRedirectUri(req);
     const response = await fetch('https://api.trakt.tv/oauth/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -383,7 +394,7 @@ app.post('/api/trakt/refresh', async (req, res) => {
       return res.status(400).json({ error: 'Missing refresh_token.' });
     }
 
-    const redirectUri = `${req.protocol}://${req.get('host')}/api/trakt/callback`;
+    const redirectUri = getRedirectUri(req);
     const response = await fetch('https://api.trakt.tv/oauth/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

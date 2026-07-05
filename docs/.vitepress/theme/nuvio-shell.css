@@ -308,7 +308,7 @@
 }
 
 .nuvio-sidebar__section-trigger > svg.is-open {
-  transform: rotate(180deg);
+  transform: rotate(90deg);
 }
 
 .nuvio-sidebar__section-trigger.is-active {
@@ -322,10 +322,36 @@ a.nuvio-sidebar__section-trigger {
 
 .nuvio-sidebar__section-items {
   position: relative;
+  display: grid;
+  grid-template-rows: 1fr;
+  overflow: hidden;
+}
+
+.nuvio-sidebar__section-items-inner {
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
   padding-top: 2px;
+}
+
+/* Sidebar dropdown transitions */
+.expand-enter-active,
+.expand-leave-active {
+  transition: grid-template-rows 250ms cubic-bezier(0.4, 0, 0.2, 1), opacity 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+.expand-enter-from,
+.expand-leave-to {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+
+.expand-enter-to,
+.expand-leave-from {
+  grid-template-rows: 1fr;
+  opacity: 1;
 }
 
 .nuvio-sidebar__section-items::before {
@@ -553,7 +579,9 @@ a.nuvio-sidebar__section-trigger {
 
 @media (prefers-reduced-motion: reduce) {
   .nuvio-sidebar,
-  .VPContent {
+  .VPContent,
+  .expand-enter-active,
+  .expand-leave-active {
     transition: none !important;
   }
 }

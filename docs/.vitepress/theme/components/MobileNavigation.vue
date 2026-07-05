@@ -262,6 +262,11 @@ watch(() => route.path, () => {
   nextTick(() => {
     updateScroll()
   })
+  sections.value.forEach((section) => {
+    if (isCurrent(section.link) || containsCurrent(section.items)) {
+      expanded.add(section.key)
+    }
+  })
 })
 
 watch(flatHeadings, (newHeadings) => {
@@ -494,31 +499,35 @@ onBeforeUnmount(() => {
               </svg>
             </button>
 
-            <div v-show="expanded.has(section.key)" class="nuvio-mobile-drawer__items">
-              <template v-for="item in section.items" :key="item.link || item.text">
-                <a
-                  v-if="item.link"
-                  class="nuvio-mobile-drawer__item"
-                  :class="{ 'is-active': isCurrent(item.link) }"
-                  :href="withBase(item.link)"
-                  :aria-current="isCurrent(item.link) ? 'page' : undefined"
-                >
-                  {{ item.text }}
-                </a>
-                <p v-else class="nuvio-mobile-drawer__subheading">{{ item.text }}</p>
+            <Transition name="expand">
+              <div v-show="expanded.has(section.key)" class="nuvio-mobile-drawer__items">
+                <div class="nuvio-mobile-drawer__items-inner">
+                  <template v-for="item in section.items" :key="item.link || item.text">
+                    <a
+                      v-if="item.link"
+                      class="nuvio-mobile-drawer__item"
+                      :class="{ 'is-active': isCurrent(item.link) }"
+                      :href="withBase(item.link)"
+                      :aria-current="isCurrent(item.link) ? 'page' : undefined"
+                    >
+                      {{ item.text }}
+                    </a>
+                    <p v-else class="nuvio-mobile-drawer__subheading">{{ item.text }}</p>
 
-                <a
-                  v-for="child in item.items || []"
-                  :key="child.link || child.text"
-                  class="nuvio-mobile-drawer__item nuvio-mobile-drawer__item--nested"
-                  :class="{ 'is-active': isCurrent(child.link) }"
-                  :href="child.link ? withBase(child.link) : undefined"
-                  :aria-current="isCurrent(child.link) ? 'page' : undefined"
-                >
-                  {{ child.text }}
-                </a>
-              </template>
-            </div>
+                    <a
+                      v-for="child in item.items || []"
+                      :key="child.link || child.text"
+                      class="nuvio-mobile-drawer__item nuvio-mobile-drawer__item--nested"
+                      :class="{ 'is-active': isCurrent(child.link) }"
+                      :href="child.link ? withBase(child.link) : undefined"
+                      :aria-current="isCurrent(child.link) ? 'page' : undefined"
+                    >
+                      {{ child.text }}
+                    </a>
+                  </template>
+                </div>
+              </div>
+            </Transition>
           </section>
 
         </nav>

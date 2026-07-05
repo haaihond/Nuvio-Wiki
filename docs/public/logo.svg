@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Nuvio">
   <defs>
     <linearGradient id="a" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#0a68f0"/>
-      <stop offset="1" stop-color="#28c4e8"/>
+      <stop stop-color="#6b16ed"/>
+      <stop offset="1" stop-color="#c084fc"/>
     </linearGradient>
   </defs>
   <rect width="64" height="64" rx="17" fill="url(#a)"/>
