@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 
 const activeTab = ref('quickstart')
 
@@ -23,6 +23,33 @@ const tabs = [
     icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="tab-icon-svg"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>`
   }
 ]
+
+const updateTabFromHash = () => {
+  if (typeof window !== 'undefined') {
+    const hash = window.location.hash.replace('#', '')
+    if (tabs.some(tab => tab.id === hash)) {
+      activeTab.value = hash
+    }
+  }
+}
+
+onMounted(() => {
+  updateTabFromHash()
+  window.addEventListener('hashchange', updateTabFromHash)
+})
+
+onUnmounted(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('hashchange', updateTabFromHash)
+  }
+})
+
+const selectTab = (id: string) => {
+  activeTab.value = id
+  if (typeof window !== 'undefined') {
+    history.pushState(null, '', '#' + id)
+  }
+}
 </script>
 
 <template>
@@ -32,7 +59,7 @@ const tabs = [
         v-for="tab in tabs"
         :key="tab.id"
         :class="['tools-tab-btn', { active: activeTab === tab.id }]"
-        @click="activeTab = tab.id"
+        @click="selectTab(tab.id)"
       >
         <span class="tab-icon-wrap" v-html="tab.icon"></span>
         <div class="tab-text-wrap">
