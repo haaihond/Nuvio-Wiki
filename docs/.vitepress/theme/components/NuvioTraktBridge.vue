@@ -404,7 +404,7 @@ async function traktRequestAll(path: string, params: Record<string, any> = {}, f
   let page = 1
   const limit = 250
   const allData: any[] = []
-  let detectedLimit = limit
+  let firstItemJson: string | null = null
 
   while (true) {
     if (page > 200) {
@@ -422,25 +422,16 @@ async function traktRequestAll(path: string, params: Record<string, any> = {}, f
         break
       }
 
-      allData.push(...res.data)
-      
-      // On the first page, detect the actual page size limit applied by the server
-      if (page === 1) {
-        const limitHeader = res.headers.get('X-Pagination-Limit') || res.headers.get('x-pagination-limit')
-        if (limitHeader) {
-          const parsedLimit = parseInt(limitHeader, 10)
-          if (!isNaN(parsedLimit) && parsedLimit > 0) {
-            detectedLimit = parsedLimit
-          }
-        } else {
-          detectedLimit = res.data.length
-        }
-      }
-
-      // If we received fewer items than the detected limit, we have reached the end.
-      if (res.data.length < detectedLimit) {
+      // Check for duplicate first item to prevent infinite loops on unpaginated endpoints
+      const currentFirstItemJson = JSON.stringify(res.data[0])
+      if (page > 1 && firstItemJson === currentFirstItemJson) {
         break
       }
+      if (page === 1) {
+        firstItemJson = currentFirstItemJson
+      }
+
+      allData.push(...res.data)
 
       // Check pagination headers if they are exposed by CORS
       const pageCountHeader = res.headers.get('X-Pagination-Page-Count') || res.headers.get('x-pagination-page-count')
@@ -459,6 +450,7 @@ async function traktRequestAll(path: string, params: Record<string, any> = {}, f
 
   return { data: allData }
 }
+
 
 // --- Nuvio Sync Flow ---
 async function signInNuvio() {
