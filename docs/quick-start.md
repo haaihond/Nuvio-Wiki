@@ -5,6 +5,7 @@ Want to get Nuvio up and running in 10 minutes? Follow this sequence:
 ## 1. Install the App
 - **Android:** Download the APK and install. [Full Guide](installation/android-mobile.md)
 - **Android TV:** Use the "Downloader" app to get the TV APK or sideload the APK. [Full Guide](installation/android-tv.md)
+- **Windows:** Download and run the MSI installer. [Latest Release](https://github.com/NuvioMedia/NuvioDesktop/releases/latest)
 - **iOS:** Sideload the .ipa. [Full Guide](installation/ios.md)
 - **WebOS:** Developer Mode Installation. [Full Guide](installation/webos.md)
 - **Tizen:** Developer Mode Installation. [Full Guide](installation/tizen.md)
