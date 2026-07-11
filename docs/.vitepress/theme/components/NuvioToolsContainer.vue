@@ -1,40 +1,60 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed, defineAsyncComponent, markRaw, ref, onMounted, onUnmounted } from 'vue'
 
-const activeTab = ref('quickstart')
+type ToolId = 'quickstart' | 'p2p' | 'trakt' | 'profile-transfer'
+
+const activeTab = ref<ToolId>('quickstart')
 
 const tabs = [
   {
     id: 'quickstart',
     label: 'Quickstart Tool',
     description: 'Configure AIOStreams & TorBox in minutes.',
+    title: 'Nuvio Quickstart Tool (TorBox & AIOStreams)',
+    details: 'This tool automates setting up Nuvio addons for you. It installs <strong>AIOStreams</strong> using Tam-Taro\'s configuration template and links your <strong>TorBox</strong> account.',
+    component: markRaw(defineAsyncComponent(() => import('./NuvioQuickstart.vue'))),
+    props: { defaultExpanded: true, hideTip: true, hideHeader: true },
     icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="tab-icon-svg"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>`
   },
   {
     id: 'p2p',
     label: 'P2P Setup Generator',
     description: 'Generate keyless P2P configurations for AIOStreams.',
+    title: 'P2P Setup Generator (P2P & AIOStreams)',
+    details: 'Generate keyless P2P configurations for AIOStreams. It resolves the full <strong>Tam-Taro Complete SEL (TAMS)</strong> template for P2P mode with no debrid keys required.',
+    component: markRaw(defineAsyncComponent(() => import('./P2PGenerator.vue'))),
+    props: {},
     icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="tab-icon-svg"><path d="M18 8A3 3 0 1 0 15 5a3 3 0 0 0 3 3ZM6 15a3 3 0 1 0-3-3 3 3 0 0 0 3 3Zm12 6a3 3 0 1 0-3-3 3 3 0 0 0 3 3Zm-3.5-3.5-8-4M8.5 11l8-4"/></svg>`
   },
   {
     id: 'trakt',
     label: 'Trakt Bridge',
     description: 'Import history and progress from Trakt.',
+    title: 'Nuvio Trakt Bridge',
+    details: 'Synchronize your watched history, continue watching progress, and library between Trakt and Nuvio Sync.',
+    component: markRaw(defineAsyncComponent(() => import('./NuvioTraktBridge.vue'))),
+    props: { defaultExpanded: true, hideTip: true, hideHeader: true },
     icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="tab-icon-svg"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>`
   },
   {
     id: 'profile-transfer',
     label: 'Profile Transfer',
     description: 'Export or import a Nuvio profile.',
+    title: 'Nuvio Profile Transfer',
+    details: 'Export a Nuvio profile to a file, or import a profile from a saved file.',
+    component: markRaw(defineAsyncComponent(() => import('./NuvioProfileTransfer.vue'))),
+    props: {},
     icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="tab-icon-svg"><path d="M7 7h11l-3-3m3 3-3 3M17 17H6l3 3m-3-3 3-3"/></svg>`
   }
-]
+] satisfies Array<{ id: ToolId; label: string; description: string; title: string; details: string; component: ReturnType<typeof defineAsyncComponent>; props: Record<string, boolean>; icon: string }>
+
+const activeTool = computed(() => tabs.find(tab => tab.id === activeTab.value) ?? tabs[0])
 
 const updateTabFromHash = () => {
   if (typeof window !== 'undefined') {
     const hash = window.location.hash.replace('#', '')
     if (tabs.some(tab => tab.id === hash)) {
-      activeTab.value = hash
+      activeTab.value = hash as ToolId
     }
   }
 }
@@ -50,7 +70,7 @@ onUnmounted(() => {
   }
 })
 
-const selectTab = (id: string) => {
+const selectTab = (id: ToolId) => {
   activeTab.value = id
   if (typeof window !== 'undefined') {
     history.pushState(null, '', '#' + id)
@@ -76,40 +96,18 @@ const selectTab = (id: string) => {
     </div>
 
     <div class="tools-content">
-      <!-- Quickstart Tool -->
-      <div v-show="activeTab === 'quickstart'" class="tool-wrapper">
+      <div class="tool-wrapper">
         <div class="tool-info-header">
-          <h2>Nuvio Quickstart Tool (TorBox &amp; AIOStreams)</h2>
-          <p>This tool automates setting up Nuvio addons for you. It installs <strong>AIOStreams</strong> using Tam-Taro's configuration template and links your <strong>TorBox</strong> account.</p>
+          <h2>{{ activeTool.title }}</h2>
+          <p v-html="activeTool.details"></p>
         </div>
-        <NuvioQuickstart :default-expanded="true" :hide-tip="true" :hide-header="true" />
-      </div>
-
-      <!-- P2P Generator -->
-      <div v-show="activeTab === 'p2p'" class="tool-wrapper">
-        <div class="tool-info-header">
-          <h2>P2P Setup Generator (P2P &amp; AIOStreams)</h2>
-          <p>Generate keyless P2P configurations for AIOStreams. It resolves the full <strong>Tam-Taro Complete SEL (TAMS)</strong> template for P2P mode with no debrid keys required.</p>
-        </div>
-        <P2PGenerator />
-      </div>
-
-      <!-- Trakt Bridge -->
-      <div v-show="activeTab === 'trakt'" class="tool-wrapper">
-        <div class="tool-info-header">
-          <h2>Nuvio Trakt Bridge</h2>
-          <p>Synchronize your watched history, continue watching progress, and library between Trakt and Nuvio Sync.</p>
-        </div>
-        <NuvioTraktBridge :default-expanded="true" :hide-tip="true" :hide-header="true" />
-      </div>
-
-      <!-- Profile Transfer -->
-      <div v-show="activeTab === 'profile-transfer'" class="tool-wrapper">
-        <div class="tool-info-header">
-          <h2>Nuvio Profile Transfer</h2>
-          <p>Export a Nuvio profile to a file, or import a profile from a saved file.</p>
-        </div>
-        <NuvioProfileTransfer />
+        <KeepAlive>
+          <component
+            :is="activeTool.component"
+            :key="activeTool.id"
+            v-bind="activeTool.props"
+          />
+        </KeepAlive>
       </div>
     </div>
   </div>
