@@ -21,6 +21,12 @@ const tabs = [
     label: 'Trakt Bridge',
     description: 'Import history and progress from Trakt.',
     icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="tab-icon-svg"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>`
+  },
+  {
+    id: 'profile-transfer',
+    label: 'Profile Backup',
+    description: 'Download or restore a Nuvio profile backup.',
+    icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="tab-icon-svg"><path d="M7 7h11l-3-3m3 3-3 3M17 17H6l3 3m-3-3 3-3"/></svg>`
   }
 ]
 
@@ -95,6 +101,15 @@ const selectTab = (id: string) => {
           <p>Synchronize your watched history, continue watching progress, and library between Trakt and Nuvio Sync.</p>
         </div>
         <NuvioTraktBridge :default-expanded="true" :hide-tip="true" :hide-header="true" />
+      </div>
+
+      <!-- Profile Backup -->
+      <div v-show="activeTab === 'profile-transfer'" class="tool-wrapper">
+        <div class="tool-info-header">
+          <h2>Nuvio Profile Backup</h2>
+          <p>Download a private backup of one Nuvio profile, or restore a backup into the profile you choose.</p>
+        </div>
+        <NuvioProfileTransfer />
       </div>
     </div>
   </div>

@@ -13,6 +13,7 @@ import {
   readFileSearchData
 } from './refresh-file-search.js';
 import { runSetup, SetupError } from './quickstart/services.js';
+import { getStatusOverview } from './status.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -215,6 +216,17 @@ const setupLimiter = rateLimit({
 });
 
 // ── Routes ──────────────────────────────────────────────────────────────
+
+app.get('/api/status', async (_req, res) => {
+  try {
+    const payload = await getStatusOverview();
+    res.setHeader('Cache-Control', 'public, max-age=30, stale-while-revalidate=120');
+    res.json(payload);
+  } catch (error) {
+    console.error('Status overview error:', error.message);
+    res.status(502).json({ error: 'Live status data is temporarily unavailable.' });
+  }
+});
 
 app.get('/api/ai/health', (_req, res) => {
   const cacheData = readCacheData();

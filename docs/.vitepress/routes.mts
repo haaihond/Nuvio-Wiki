@@ -22,7 +22,8 @@ export const siteRoutes = {
   troubleshooting: '/troubleshooting',
   faq: '/faq',
   officialLinks: '/official-links',
-  tools: '/tools'
+  tools: '/tools',
+  status: '/status'
 } as const
 
 export type SiteRoute = (typeof siteRoutes)[keyof typeof siteRoutes]

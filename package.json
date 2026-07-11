@@ -9,7 +9,8 @@
     "docs:build": "vitepress build docs && node scripts/check-internal-links.mjs",
     "docs:preview": "vitepress preview docs",
     "docs:fix": "node scripts/update-docs.mjs",
-    "server:dev": "npm --prefix server run dev"
+    "server:dev": "npm --prefix server run dev",
+    "test:profile-transfer": "node --test docs/.vitepress/theme/components/profileTransferMerge.test.ts"
   },
   "devDependencies": {
     "concurrently": "^10.0.3",

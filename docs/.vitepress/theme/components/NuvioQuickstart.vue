@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, nextTick } from 'vue'
 import { useData, withBase } from 'vitepress'
 
 const { lang } = useData()
@@ -74,7 +74,11 @@ const translations = {
     nuvioEmail: 'Nuvio email',
     nuvioPasswordLabel: 'Nuvio password',
     aiostreamsPasswordLabel: 'AIOStreams settings password',
-    newAccountBadge: 'New account'
+    newAccountBadge: 'New account',
+    showNuvioPassword: 'Show Nuvio password',
+    hideNuvioPassword: 'Hide Nuvio password',
+    showTorboxApiKey: 'Show TorBox API key',
+    hideTorboxApiKey: 'Hide TorBox API key'
   },
   nl: {
     title: 'Accountgegevens',
@@ -134,7 +138,11 @@ const translations = {
     nuvioEmail: 'Nuvio e-mail',
     nuvioPasswordLabel: 'Nuvio-wachtwoord',
     aiostreamsPasswordLabel: 'AIOStreams-instellingen wachtwoord',
-    newAccountBadge: 'Nieuw account'
+    newAccountBadge: 'Nieuw account',
+    showNuvioPassword: 'Nuvio-wachtwoord tonen',
+    hideNuvioPassword: 'Nuvio-wachtwoord verbergen',
+    showTorboxApiKey: 'TorBox API-sleutel tonen',
+    hideTorboxApiKey: 'TorBox API-sleutel verbergen'
   }
 }
 
@@ -277,7 +285,17 @@ function handleRetry() {
 
 // --- Setup Submission (SSE stream parsing) ---
 async function submitSetup() {
-  if (!validateForm()) return
+  if (!validateForm()) {
+    const firstInvalidField = (['email', 'nuvioPassword', 'torboxApiKey', 'aiostreamsPassword'] as const)
+      .find((field) => errors[field])
+
+    if (firstInvalidField) {
+      await nextTick()
+      document.getElementById(firstInvalidField)?.focus()
+    }
+
+    return
+  }
 
   isSubmitting.value = true
   globalError.value = null
@@ -381,15 +399,22 @@ async function submitSetup() {
     <!-- The actual setup tool card -->
     <div class="nuvio-quickstart border-base" :class="{ 'is-expanded': !isCollapsed, 'is-standalone': hideHeader }">
       <!-- HEADER acting as accordion toggle -->
-      <div v-if="!hideHeader" class="qs-header clickable-header" @click="isCollapsed = !isCollapsed" role="button" :aria-expanded="!isCollapsed" tabindex="0" @keydown.enter.prevent="isCollapsed = !isCollapsed" @keydown.space.prevent="isCollapsed = !isCollapsed">
-        <div class="qs-brand">
+      <button
+        v-if="!hideHeader"
+        class="qs-header clickable-header"
+        type="button"
+        :aria-expanded="!isCollapsed"
+        aria-controls="nuvio-quickstart-body"
+        @click="isCollapsed = !isCollapsed"
+      >
+        <span class="qs-brand">
           <svg viewBox="0 0 40 40" class="logo-mark" aria-hidden="true">
             <path d="M9 27V13l11-6 11 6v14l-11 6-11-6Z"></path>
             <path d="m15 24 5-9 5 9"></path>
           </svg>
           <span class="qs-brand-text">Nuvio Quickstart Tool</span>
-        </div>
-        <div class="qs-meta-actions">
+        </span>
+        <span class="qs-meta-actions">
           <span v-if="!isCollapsed" class="secure-note">
             <svg viewBox="0 0 20 20" aria-hidden="true" class="icon-secure">
               <path d="M5 8V6a5 5 0 0 1 10 0v2"></path>
@@ -400,11 +425,11 @@ async function submitSetup() {
           <svg viewBox="0 0 20 20" aria-hidden="true" class="summary-arrow" :class="{ rotated: !isCollapsed }">
             <path d="m6 8 4 4 4-4"></path>
           </svg>
-        </div>
-      </div>
+        </span>
+      </button>
 
       <!-- COLLAPSIBLE FORM BODY -->
-      <div v-show="!isCollapsed" class="qs-body">
+      <div id="nuvio-quickstart-body" v-show="!isCollapsed" class="qs-body">
 
     <!-- ERROR PANEL -->
     <div v-if="globalError" class="error-panel" role="alert">
@@ -443,10 +468,12 @@ async function submitSetup() {
             :placeholder="t.emailPlaceholder"
             autocomplete="email"
             required
+            :aria-invalid="Boolean(errors.email)"
+            :aria-describedby="errors.email ? 'email-error' : undefined"
             @input="errors.email = ''"
           />
         </div>
-        <span v-if="errors.email" class="field-error">{{ errors.email }}</span>
+        <span v-if="errors.email" id="email-error" class="field-error">{{ errors.email }}</span>
       </div>
 
       <!-- Nuvio Password Field -->
@@ -464,16 +491,24 @@ async function submitSetup() {
             :placeholder="t.passwordPlaceholder"
             autocomplete="current-password"
             required
+            :aria-invalid="Boolean(errors.nuvioPassword)"
+            :aria-describedby="errors.nuvioPassword ? 'nuvio-password-error' : undefined"
             @input="errors.nuvioPassword = ''"
           />
-          <button class="password-toggle" type="button" @click="showNuvioPassword = !showNuvioPassword" aria-label="Toggle password visibility">
+          <button
+            class="password-toggle"
+            type="button"
+            :aria-label="showNuvioPassword ? t.hideNuvioPassword : t.showNuvioPassword"
+            :aria-pressed="showNuvioPassword"
+            @click="showNuvioPassword = !showNuvioPassword"
+          >
             <svg class="toggle-icon" viewBox="0 0 20 20" aria-hidden="true">
               <path d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5Z"></path>
               <circle cx="10" cy="10" r="2.5"></circle>
             </svg>
           </button>
         </div>
-        <span v-if="errors.nuvioPassword" class="field-error">{{ errors.nuvioPassword }}</span>
+        <span v-if="errors.nuvioPassword" id="nuvio-password-error" class="field-error">{{ errors.nuvioPassword }}</span>
       </div>
 
       <div class="divider"></div>
@@ -525,9 +560,17 @@ async function submitSetup() {
             :placeholder="t.torboxKeyPlaceholder"
             autocomplete="off"
             required
+            :aria-invalid="Boolean(errors.torboxApiKey)"
+            :aria-describedby="errors.torboxApiKey ? 'torbox-api-key-error' : undefined"
             @input="errors.torboxApiKey = ''"
           />
-          <button class="password-toggle" type="button" @click="showTorboxApiKey = !showTorboxApiKey" aria-label="Toggle API Key visibility">
+          <button
+            class="password-toggle"
+            type="button"
+            :aria-label="showTorboxApiKey ? t.hideTorboxApiKey : t.showTorboxApiKey"
+            :aria-pressed="showTorboxApiKey"
+            @click="showTorboxApiKey = !showTorboxApiKey"
+          >
             <svg class="toggle-icon" viewBox="0 0 20 20" aria-hidden="true">
               <path d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5Z"></path>
               <circle cx="10" cy="10" r="2.5"></circle>
@@ -538,7 +581,7 @@ async function submitSetup() {
           {{ t.torboxHelp }}
           <a href="https://torbox.app/settings" target="_blank" rel="noreferrer">{{ t.torboxHelpLink }}</a>.
         </div>
-        <span v-if="errors.torboxApiKey" class="field-error">{{ errors.torboxApiKey }}</span>
+        <span v-if="errors.torboxApiKey" id="torbox-api-key-error" class="field-error">{{ errors.torboxApiKey }}</span>
       </div>
 
       <!-- AIOStreams Config Password Field -->
@@ -553,6 +596,8 @@ async function submitSetup() {
             v-model="form.aiostreamsPassword"
             type="text"
             required
+            :aria-invalid="Boolean(errors.aiostreamsPassword)"
+            :aria-describedby="errors.aiostreamsPassword ? 'aiostreams-password-error' : undefined"
             @input="errors.aiostreamsPassword = ''"
           />
           <button class="text-btn-action" type="button" @click="generatePassword">
@@ -560,7 +605,7 @@ async function submitSetup() {
           </button>
         </div>
         <div class="field-help">{{ t.aiostreamsPwdHelp }}</div>
-        <span v-if="errors.aiostreamsPassword" class="field-error">{{ errors.aiostreamsPassword }}</span>
+        <span v-if="errors.aiostreamsPassword" id="aiostreams-password-error" class="field-error">{{ errors.aiostreamsPassword }}</span>
       </div>
 
       <!-- Advanced Details -->
@@ -757,17 +802,22 @@ async function submitSetup() {
 }
 
 .nuvio-quickstart {
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 16px;
-  background: var(--vp-c-bg-soft);
-  padding: 16px 24px;
+  --qs-success: color-mix(in srgb, #10b981 66%, var(--vp-c-text-1));
+  --qs-warning: color-mix(in srgb, #f59e0b 55%, var(--vp-c-text-1));
+  --qs-danger: color-mix(in srgb, #ef4444 74%, var(--vp-c-text-1));
+  border: 1px solid var(--vp-c-border);
+  border-radius: 14px;
+  background: var(--vp-c-bg-elv);
+  padding: 16px 20px;
   margin: 16px 0 28px 0;
   color: var(--vp-c-text-1);
-  transition: padding 0.2s ease;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--vp-c-text-1) 8%, transparent);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, padding 0.2s ease;
 }
 
 .nuvio-quickstart.is-expanded {
-  padding: 24px;
+  border-color: color-mix(in srgb, var(--vp-c-brand-1) 24%, var(--vp-c-border));
+  padding: 20px 24px 24px;
 }
 
 .nuvio-quickstart.is-standalone {
@@ -780,10 +830,17 @@ async function submitSetup() {
 
 .qs-header {
   display: flex;
+  width: 100%;
   justify-content: space-between;
   align-items: center;
+  border: 0;
   border-bottom: 1px solid transparent;
-  padding-bottom: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  appearance: none;
+  padding: 0;
   margin-bottom: 0;
   cursor: pointer;
   user-select: none;
@@ -792,7 +849,7 @@ async function submitSetup() {
 
 .qs-header:focus-visible {
   outline: 2px solid var(--vp-c-brand-1);
-  outline-offset: 4px;
+  outline-offset: 3px;
   border-radius: 6px;
 }
 
@@ -817,22 +874,23 @@ async function submitSetup() {
 }
 
 .logo-mark {
-  width: 32px;
-  height: 32px;
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 6px;
-  background: var(--vp-c-brand-1);
+  width: 30px;
+  height: 30px;
+  border: 1px solid color-mix(in srgb, var(--vp-c-brand-1) 32%, var(--vp-c-border));
+  border-radius: 8px;
+  background: var(--vp-c-brand-soft);
   fill: none;
-  stroke: #ffffff;
+  stroke: var(--vp-c-brand-1);
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
 .qs-brand-text {
-  font-family: var(--vp-font-family-mono);
+  font-family: var(--vp-font-family-base);
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 650;
+  letter-spacing: -0.01em;
 }
 
 .secure-note {
@@ -841,13 +899,14 @@ async function submitSetup() {
   align-items: center;
   color: var(--vp-c-text-2);
   font-size: 12px;
+  font-weight: 500;
 }
 
 .icon-secure {
   width: 14px;
   height: 14px;
   fill: none;
-  stroke: #10b981;
+  stroke: var(--qs-success);
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2;
@@ -857,7 +916,7 @@ async function submitSetup() {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 20px;
+  margin-bottom: 18px;
 }
 
 .step-num {
@@ -866,29 +925,38 @@ async function submitSetup() {
   justify-content: center;
   width: 24px;
   height: 24px;
-  border-radius: 50%;
-  background: var(--vp-c-brand-1);
-  color: #ffffff;
+  border: 1px solid color-mix(in srgb, var(--vp-c-brand-1) 30%, var(--vp-c-border));
+  border-radius: 7px;
+  background: var(--vp-c-brand-soft);
+  color: var(--vp-c-brand-1);
   font-size: 12px;
   font-weight: 700;
 }
 
 .form-section-title strong {
   display: block;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 650;
   color: var(--vp-c-text-1);
 }
 
 .form-section-title small {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--vp-c-text-2);
   line-height: 1.2;
 }
 
 .form-field {
-  margin-bottom: 20px;
+  margin-bottom: 18px;
+}
+
+.qs-form,
+.progress-panel,
+.result-panel {
+  max-width: 640px;
+  margin-right: auto;
+  margin-left: auto;
 }
 
 .field-label {
@@ -921,14 +989,21 @@ async function submitSetup() {
 
 .input-container input {
   width: 100%;
-  padding: 10px 12px 10px 38px;
-  border: 1px solid var(--vp-c-divider);
+  min-height: 44px;
+  padding: 10px 12px 10px 40px;
+  border: 1px solid var(--vp-c-border);
   border-radius: 8px;
   background: var(--vp-c-bg-alt);
   color: var(--vp-c-text-1);
   font-size: 14px;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  line-height: 1.4;
+  transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
   outline: none;
+}
+
+.input-container input:hover,
+.simple-input:hover {
+  border-color: color-mix(in srgb, var(--vp-c-brand-1) 22%, var(--vp-c-border));
 }
 
 .input-container input:focus {
@@ -938,14 +1013,18 @@ async function submitSetup() {
 
 .password-toggle {
   position: absolute;
-  right: 12px;
+  right: 4px;
+  min-width: 36px;
+  min-height: 36px;
   border: none;
+  border-radius: 6px;
   background: none;
   color: var(--vp-c-text-2);
   cursor: pointer;
   padding: 4px;
   display: flex;
   align-items: center;
+  justify-content: center;
 }
 
 .password-toggle:hover {
@@ -964,9 +1043,14 @@ async function submitSetup() {
 
 .text-btn-action {
   position: absolute;
-  right: 12px;
+  right: 4px;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
   background: none;
   border: none;
+  border-radius: 6px;
   color: var(--vp-c-brand-1);
   font-size: 11px;
   font-weight: 700;
@@ -981,6 +1065,7 @@ async function submitSetup() {
   font-size: 11px;
   color: var(--vp-c-text-3);
   margin-top: 4px;
+  line-height: 1.45;
 }
 
 .field-help a {
@@ -991,16 +1076,16 @@ async function submitSetup() {
 .field-error {
   display: block;
   font-size: 11px;
-  color: #ef4444;
+  color: var(--qs-danger);
   margin-top: 4px;
 }
 
 .form-field.has-error input {
-  border-color: #ef4444;
+  border-color: var(--qs-danger);
 }
 
 .form-field.has-error input:focus {
-  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--qs-danger) 16%, transparent);
 }
 
 .divider {
@@ -1013,11 +1098,11 @@ async function submitSetup() {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: color-mix(in srgb, var(--vp-c-brand-1) 8%, var(--vp-c-bg-alt));
-  border: 1px dashed var(--vp-c-brand-1);
-  border-radius: 8px;
-  padding: 12px 16px;
-  margin-bottom: 20px;
+  background: color-mix(in srgb, var(--vp-c-brand-1) 6%, var(--vp-c-bg-alt));
+  border: 1px solid color-mix(in srgb, var(--vp-c-brand-1) 24%, var(--vp-c-border));
+  border-radius: 10px;
+  padding: 13px 14px;
+  margin-bottom: 18px;
   gap: 12px;
 }
 
@@ -1055,19 +1140,21 @@ async function submitSetup() {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: var(--vp-c-brand-1);
-  color: #ffffff !important;
+  background: var(--vp-c-bg-elv);
+  border: 1px solid color-mix(in srgb, var(--vp-c-brand-1) 35%, var(--vp-c-border));
+  color: var(--vp-c-brand-1) !important;
   font-size: 11px;
   font-weight: 700;
-  padding: 8px 12px;
+  padding: 8px 10px;
   border-radius: 6px;
   text-decoration: none !important;
-  transition: opacity 0.15s;
+  transition: background-color 0.15s, border-color 0.15s;
   white-space: nowrap;
 }
 
 .callout-link:hover {
-  opacity: 0.9;
+  background: var(--vp-c-brand-soft);
+  border-color: var(--vp-c-brand-1);
 }
 
 .external-icon {
@@ -1079,9 +1166,9 @@ async function submitSetup() {
 }
 
 .advanced-section {
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 8px;
-  background: var(--vp-c-bg-alt);
+  border: 1px solid var(--vp-c-border);
+  border-radius: 10px;
+  background: var(--vp-c-bg-soft);
   padding: 12px 16px;
   margin-bottom: 24px;
 }
@@ -1141,8 +1228,9 @@ async function submitSetup() {
 
 .simple-input {
   width: 100%;
+  min-height: 42px;
   padding: 8px 12px;
-  border: 1px solid var(--vp-c-divider);
+  border: 1px solid var(--vp-c-border);
   border-radius: 8px;
   background: var(--vp-c-bg-alt);
   color: var(--vp-c-text-1);
@@ -1152,6 +1240,7 @@ async function submitSetup() {
 
 .simple-input:focus {
   border-color: var(--vp-c-brand-1);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--vp-c-brand-1) 15%, transparent);
 }
 
 .optional-label {
@@ -1162,6 +1251,7 @@ async function submitSetup() {
 
 .btn-primary {
   display: inline-flex;
+  min-height: 44px;
   align-items: center;
   justify-content: center;
   background: var(--vp-c-brand-1);
@@ -1171,11 +1261,13 @@ async function submitSetup() {
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
-  transition: opacity 0.15s, transform 0.1s;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--vp-c-brand-1) 24%, transparent);
+  transition: background-color 0.15s, box-shadow 0.15s, transform 0.1s;
 }
 
 .btn-primary:hover {
-  opacity: 0.9;
+  background: var(--vp-c-brand-2);
+  box-shadow: 0 4px 10px color-mix(in srgb, var(--vp-c-brand-1) 20%, transparent);
 }
 
 .btn-primary:active {
@@ -1185,6 +1277,7 @@ async function submitSetup() {
 .btn-primary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
 .btn-large {
@@ -1319,19 +1412,20 @@ async function submitSetup() {
 }
 
 .progress-list li.done > span {
-  border-color: #10b981;
-  background: #10b981;
+  border-color: var(--qs-success);
+  background: var(--qs-success);
 }
 
 /* ERROR PANEL */
 .error-panel {
   display: flex;
   align-items: center;
-  background: color-mix(in srgb, #ef4444 8%, var(--vp-c-bg-soft));
-  border: 1px solid #ef4444;
-  border-radius: 8px;
+  max-width: 640px;
+  background: color-mix(in srgb, var(--qs-danger) 8%, var(--vp-c-bg-soft));
+  border: 1px solid color-mix(in srgb, var(--qs-danger) 58%, var(--vp-c-border));
+  border-radius: 10px;
   padding: 14px 16px;
-  margin-bottom: 24px;
+  margin: 0 auto 24px;
   gap: 14px;
 }
 
@@ -1339,7 +1433,7 @@ async function submitSetup() {
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: #ef4444;
+  background: var(--qs-danger);
   color: #ffffff;
   display: inline-flex;
   align-items: center;
@@ -1362,15 +1456,15 @@ async function submitSetup() {
 
 .error-desc {
   font-size: 11px;
-  color: #fca5a5;
+  color: var(--qs-danger);
   margin: 2px 0 0 0;
   line-height: 1.4;
 }
 
 .retry-btn {
   background: transparent;
-  border: 1px solid #ef4444;
-  color: #ef4444;
+  border: 1px solid var(--qs-danger);
+  color: var(--qs-danger);
   font-size: 11px;
   font-weight: 700;
   padding: 6px 12px;
@@ -1380,7 +1474,7 @@ async function submitSetup() {
 }
 
 .retry-btn:hover {
-  background: #ef4444;
+  background: var(--qs-danger);
   color: #ffffff;
 }
 
@@ -1394,13 +1488,13 @@ async function submitSetup() {
   width: 52px;
   height: 52px;
   border-radius: 50%;
-  background: color-mix(in srgb, #10b981 12%, var(--vp-c-bg-soft));
-  border: 1px solid #10b981;
+  background: color-mix(in srgb, var(--qs-success) 12%, var(--vp-c-bg-soft));
+  border: 1px solid color-mix(in srgb, var(--qs-success) 58%, var(--vp-c-border));
   display: flex;
   align-items: center;
   justify-content: center;
   margin: 0 auto 16px;
-  color: #10b981;
+  color: var(--qs-success);
 }
 
 .success-mark svg {
@@ -1420,7 +1514,7 @@ async function submitSetup() {
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #10b981;
+  color: var(--qs-success);
   margin-bottom: 6px;
 }
 
@@ -1443,6 +1537,7 @@ async function submitSetup() {
 
 .result-addons {
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   justify-content: center;
   margin-bottom: 24px;
@@ -1453,8 +1548,8 @@ async function submitSetup() {
   align-items: center;
   gap: 8px;
   background: var(--vp-c-bg-alt);
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 6px;
+  border: 1px solid var(--vp-c-border);
+  border-radius: 8px;
   padding: 6px 12px 6px 8px;
   font-size: 12px;
   font-weight: 600;
@@ -1502,7 +1597,7 @@ async function submitSetup() {
 
 .manifest-copy-row {
   display: flex;
-  border: 1px solid var(--vp-c-divider);
+  border: 1px solid var(--vp-c-border);
   border-radius: 8px;
   background: var(--vp-c-bg-alt);
   overflow: hidden;
@@ -1527,11 +1622,11 @@ async function submitSetup() {
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
-  transition: opacity 0.15s;
+  transition: background-color 0.15s;
 }
 
 .copy-btn:hover {
-  opacity: 0.9;
+  background: var(--vp-c-brand-2);
 }
 
 .result-actions {
@@ -1549,7 +1644,8 @@ async function submitSetup() {
 
 .btn-secondary {
   background: transparent;
-  border: 1px solid var(--vp-c-divider);
+  min-height: 44px;
+  border: 1px solid var(--vp-c-border);
   color: var(--vp-c-text-1);
   padding: 10px 20px;
   border-radius: 8px;
@@ -1567,7 +1663,7 @@ async function submitSetup() {
   font-size: 11px;
   color: var(--vp-c-text-2);
   background: var(--vp-c-bg-alt);
-  border: 1px solid var(--vp-c-divider);
+  border: 1px solid var(--vp-c-border);
   border-radius: 8px;
   padding: 10px 14px;
   display: inline-block;
@@ -1581,9 +1677,9 @@ async function submitSetup() {
   text-align: left;
   max-width: 480px;
   margin: 0 auto 24px;
-  border: 1px solid #78350f;
+  border: 1px solid color-mix(in srgb, var(--qs-warning) 48%, var(--vp-c-border));
   border-radius: 10px;
-  background: color-mix(in srgb, #f59e0b 6%, var(--vp-c-bg-alt));
+  background: color-mix(in srgb, var(--qs-warning) 7%, var(--vp-c-bg-alt));
   overflow: hidden;
 }
 
@@ -1592,19 +1688,19 @@ async function submitSetup() {
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
-  border-bottom: 1px solid #78350f;
+  border-bottom: 1px solid color-mix(in srgb, var(--qs-warning) 36%, var(--vp-c-border));
   flex-wrap: wrap;
 }
 
 .credentials-header strong {
   font-size: 12px;
   font-weight: 700;
-  color: #fbbf24;
+  color: var(--qs-warning);
 }
 
 .cred-save-note {
   font-size: 11px;
-  color: #d97706;
+  color: var(--qs-warning);
   margin-left: auto;
 }
 
@@ -1612,7 +1708,7 @@ async function submitSetup() {
   width: 14px;
   height: 14px;
   fill: none;
-  stroke: #fbbf24;
+  stroke: var(--qs-warning);
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 1.8;
@@ -1648,9 +1744,9 @@ async function submitSetup() {
 
 .cred-badge {
   display: inline-block;
-  background: color-mix(in srgb, #10b981 15%, transparent);
-  color: #10b981;
-  border: 1px solid #10b981;
+  background: color-mix(in srgb, var(--qs-success) 15%, transparent);
+  color: var(--qs-success);
+  border: 1px solid var(--qs-success);
   border-radius: 4px;
   font-size: 9px;
   font-weight: 700;
@@ -1669,16 +1765,44 @@ async function submitSetup() {
 .cred-value.mono {
   font-family: var(--vp-font-family-mono);
   font-size: 11px;
-  color: #fbbf24;
+  color: var(--qs-warning);
+}
+
+.password-toggle:focus-visible,
+.text-btn-action:focus-visible,
+.field-help a:focus-visible,
+.callout-link:focus-visible,
+.advanced-summary:focus-visible,
+.btn-primary:focus-visible,
+.btn-secondary:focus-visible,
+.copy-btn:focus-visible,
+.retry-btn:focus-visible {
+  outline: 2px solid var(--vp-c-brand-1);
+  outline-offset: 2px;
 }
 
 /* Prevent text overlapping with absolute buttons/toggles */
 .input-container input:has(+ .password-toggle) {
-  padding-right: 44px;
+  padding-right: 48px;
 }
 
 .input-container input:has(+ .text-btn-action) {
   padding-right: 96px;
+}
+
+@media (max-width: 600px) {
+  .error-panel {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .error-content {
+    min-width: 0;
+  }
+
+  .retry-btn {
+    margin-left: 42px;
+  }
 }
 
 /* Mobile responsive styles */
@@ -1692,12 +1816,23 @@ async function submitSetup() {
     padding: 18px 14px;
   }
 
+  .nuvio-quickstart.is-standalone,
+  .nuvio-quickstart.is-standalone.is-expanded {
+    padding: 0;
+    margin: 0;
+  }
+
   .qs-header {
     gap: 8px;
   }
 
   .qs-brand-text {
     font-size: 13px;
+  }
+
+  .input-container input,
+  .simple-input {
+    font-size: 16px;
   }
 
   .secure-note-text {

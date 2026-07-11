@@ -966,8 +966,14 @@ async function buildSyncPlan(isPreviewOnly = false) {
       }
       if (state.options.syncCollection) {
         logLine('Fetching Trakt collection...')
-        const col = await traktRequestAll('/sync/collection')
-        items.push(...(Array.isArray(col.data) ? col.data.map(i => ({ ...i, _src: 'collection' })) : []))
+        const [movies, shows] = await Promise.all([
+          traktRequestAll('/sync/collection/movies'),
+          traktRequest('/sync/collection/shows')
+        ])
+        items.push(
+          ...(Array.isArray(movies.data) ? movies.data.map(i => ({ ...i, _src: 'collection' })) : []),
+          ...(Array.isArray(shows.data) ? shows.data.map(i => ({ ...i, _src: 'collection' })) : [])
+        )
       }
 
       for (const item of items) {
@@ -981,7 +987,7 @@ async function buildSyncPlan(isPreviewOnly = false) {
           content_id: id,
           content_type: kind,
           name: media?.title || 'Untitled',
-          added_at: new Date(item.listed_at || item.collected_at || Date.now()).getTime(),
+          added_at: new Date(item.listed_at || item.collected_at || item.last_collected_at || Date.now()).getTime(),
           _display_type: `${item._src} item`,
           _ids: media?.ids
         })

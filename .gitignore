@@ -13,3 +13,10 @@ server/node_modules/
 
 # Scratch files
 scratch/
+
+# Local agent instructions
+/AGENTS.md
+
+# AI Agent/Tool output
+.codex/
+graphify-out/

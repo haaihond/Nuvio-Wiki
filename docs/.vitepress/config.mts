@@ -41,6 +41,17 @@ function buildNav(locale: WikiLocale): DefaultTheme.NavItem[] {
     }
   ]
 
+  if (locale.key === 'root') {
+    nav.push({
+      text: 'Resources',
+      items: [
+        { text: 'Tools', link: siteRoutes.tools },
+        { text: 'Service status', link: siteRoutes.status },
+        { text: 'Official links', link: siteRoutes.officialLinks }
+      ]
+    })
+  }
+
   if (wikiLocales.length === 1) {
     nav.push({
       text: englishLocale.label,
@@ -113,6 +124,7 @@ function buildSidebar(locale: WikiLocale): DefaultTheme.SidebarItem[] {
       'integrations',
       'settings',
       'tools.md',
+      'status.md',
       'glossary.md',
       'troubleshooting.md',
       'faq.md',
@@ -285,6 +297,10 @@ export default defineConfig({
           changeOrigin: true
         },
         '/api/trakt': {
+          target: 'http://localhost:3001',
+          changeOrigin: true
+        },
+        '/api/status': {
           target: 'http://localhost:3001',
           changeOrigin: true
         }

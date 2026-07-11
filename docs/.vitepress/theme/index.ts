@@ -8,6 +8,7 @@ import MobileNavigation from './components/MobileNavigation.vue'
 import NuvioQuickstart from './components/NuvioQuickstart.vue'
 import NuvioTraktBridge from './components/NuvioTraktBridge.vue'
 import NuvioToolsContainer from './components/NuvioToolsContainer.vue'
+import NuvioProfileTransfer from './components/NuvioProfileTransfer.vue'
 import './custom.css'
 import './nuvio-shell.css'
 import './mobile-shell.css'
@@ -24,5 +25,6 @@ export default {
     app.component('NuvioQuickstart', NuvioQuickstart)
     app.component('NuvioTraktBridge', NuvioTraktBridge)
     app.component('NuvioToolsContainer', NuvioToolsContainer)
+    app.component('NuvioProfileTransfer', NuvioProfileTransfer)
   }
 }

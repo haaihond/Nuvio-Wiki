@@ -44,7 +44,6 @@ and resource name are visible at `GET /api/ai/health`.
 
 ## Production Deployment (Nginx Reverse Proxy)
 
-When running the wiki website and AI server in production behind Nginx, you must route requests starting with `/api/ai` and `/api/trakt` to the Express backend (default port `3001`).
+When running the wiki website and AI server in production behind Nginx, you must route requests starting with `/api/ai` and `/api/trakt`, plus `/api/status`, to the Express backend (default port `3001`).
 
-An example Nginx location block configuration is provided in [wiki-api.location.conf](../deploy/nginx/wiki-api.location.conf). Include these configuration blocks inside your site's HTTPS server block to enable the AI assistant and Trakt bridge to work correctly.
-
+An example Nginx location block configuration is provided in [wiki-api.location.conf](../deploy/nginx/wiki-api.location.conf). Include these configuration blocks inside your site's HTTPS server block to enable the AI assistant, Trakt bridge, and live status page.

@@ -543,7 +543,7 @@ a.nuvio-sidebar__section-trigger {
     left: 16px;
     display: flex;
     gap: 2px;
-    width: 98px;
+    width: 66px;
     height: 36px;
     padding: 2px;
     border: 1px solid var(--nuvio-sidebar-border);
