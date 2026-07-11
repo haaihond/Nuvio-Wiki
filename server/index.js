@@ -542,9 +542,9 @@ app.get('/api/admin/overview', requireAdminSession, (req, res) => {
   res.json(buildAdminOverview(req.adminSession));
 });
 
-app.get('/api/status', async (_req, res) => {
+app.get('/api/status', async (req, res) => {
   try {
-    const payload = await getStatusOverview();
+    const payload = await getStatusOverview({ provider: req.query.provider });
     res.setHeader('Cache-Control', 'public, max-age=30, stale-while-revalidate=120');
     res.json(payload);
   } catch (error) {

@@ -10,7 +10,6 @@ import {
 
 type AdminTab = 'overview' | 'traffic' | 'services' | 'system'
 type TrafficWindow = 'minutes' | 'hours'
-type ServiceState = 'operational' | 'degraded' | 'outage' | 'unknown'
 
 interface TrafficPoint {
   at?: string | null
@@ -110,41 +109,6 @@ interface AdminOverview {
   security?: SecurityOverview | null
 }
 
-interface StatusHistory {
-  status?: ServiceState | string | null
-  latencyMs?: number | null
-  checkedAt?: string | null
-}
-
-interface StatusService {
-  id?: string | null
-  name?: string | null
-  group?: string | null
-  kind?: 'platform' | 'community' | string | null
-  url?: string | null
-  hostname?: string | null
-  status?: ServiceState | string | null
-  latencyMs?: number | null
-  checkedAt?: string | null
-  history?: StatusHistory[] | null
-}
-
-interface StatusSummary {
-  total?: number | null
-  operational?: number | null
-  degraded?: number | null
-  outages?: number | null
-  unknown?: number | null
-}
-
-interface StatusPayload {
-  updatedAt?: string | null
-  partial?: boolean | null
-  notices?: string[] | null
-  summary?: StatusSummary | null
-  services?: StatusService[] | null
-}
-
 class HttpError extends Error {
   status: number
 
@@ -170,7 +134,7 @@ const emit = defineEmits<{
 const tabs: Array<{ id: AdminTab; label: string; description: string }> = [
   { id: 'overview', label: 'Overview', description: 'Live operating picture' },
   { id: 'traffic', label: 'Traffic', description: 'Requests and latency' },
-  { id: 'services', label: 'Services', description: 'Health and integrations' },
+  { id: 'services', label: 'Services', description: 'Integrations and knowledge' },
   { id: 'system', label: 'System', description: 'Runtime and security' }
 ]
 
@@ -179,13 +143,11 @@ const closeButton = ref<HTMLButtonElement | null>(null)
 const activeTab = ref<AdminTab>('overview')
 const trafficWindow = ref<TrafficWindow>('minutes')
 const overview = ref<AdminOverview | null>(null)
-const publicStatus = ref<StatusPayload | null>(null)
 const isLoading = ref(true)
 const isRefreshing = ref(false)
 const isLoggingOut = ref(false)
 const sessionExpired = ref(false)
 const adminError = ref('')
-const statusError = ref('')
 const lastSuccessfulAt = ref(0)
 
 let mounted = false
@@ -208,7 +170,6 @@ const chartSeries = computed(() =>
 )
 const endpointRows = computed(() => normalizeArray<EndpointMetric>(traffic.value.endpoints))
 const recentRequests = computed(() => normalizeArray<RecentRequest>(traffic.value.recentRequests))
-const statusServices = computed(() => normalizeArray<StatusService>(publicStatus.value?.services))
 
 const activeTabDetails = computed(() =>
   tabs.find((tab) => tab.id === activeTab.value) || tabs[0]
@@ -238,22 +199,6 @@ const integrationEntries = computed(() => {
 
 const fileSearchEntries = computed(() => objectEntries(knowledge.value.fileSearch))
 const cacheEntries = computed(() => objectEntries(knowledge.value.cache))
-
-const overallServiceState = computed<ServiceState>(() => {
-  const summary = publicStatus.value?.summary
-  if (!publicStatus.value) return 'unknown'
-  if ((finiteNumber(summary?.outages) ?? 0) > 0) return 'outage'
-  if ((finiteNumber(summary?.degraded) ?? 0) > 0) return 'degraded'
-  if ((finiteNumber(summary?.unknown) ?? 0) > 0 || publicStatus.value.partial) return 'unknown'
-  return 'operational'
-})
-
-const overallServiceLabel = computed(() => ({
-  operational: 'All monitored services operational',
-  degraded: 'Some services are degraded',
-  outage: 'A monitored service is down',
-  unknown: 'Service health is incomplete'
-}[overallServiceState.value]))
 
 const activityBars = computed(() => {
   const points = minuteSeries.value.slice(-24)
@@ -345,12 +290,9 @@ async function refreshDashboard(manual = false) {
   if (!overview.value) isLoading.value = true
   if (manual || overview.value) isRefreshing.value = true
   adminError.value = ''
-  statusError.value = ''
-
-  const [adminResult, statusResult] = await Promise.allSettled([
-    requestJson<AdminOverview>('/api/admin/overview', controller.signal),
-    requestJson<StatusPayload>('/api/status', controller.signal)
-  ])
+  const adminResult = await Promise.resolve(requestJson<AdminOverview>('/api/admin/overview', controller.signal))
+    .then((value) => ({ status: 'fulfilled' as const, value }))
+    .catch((reason) => ({ status: 'rejected' as const, reason }))
 
   if (sequence !== requestSequence) return
 
@@ -370,15 +312,6 @@ async function refreshDashboard(manual = false) {
     } else {
       adminError.value = 'Admin telemetry could not be loaded. Existing values may be out of date.'
     }
-  }
-
-  if (statusResult.status === 'fulfilled') {
-    publicStatus.value = statusResult.value && typeof statusResult.value === 'object'
-      ? statusResult.value
-      : {}
-    receivedData = true
-  } else if (!isAbortError(statusResult.reason)) {
-    statusError.value = 'Public service health is temporarily unavailable.'
   }
 
   if (receivedData) lastSuccessfulAt.value = Date.now()
@@ -659,25 +592,6 @@ function statusCodeTone(code: string) {
   return 'neutral'
 }
 
-function normalizedServiceState(value: unknown): ServiceState {
-  return ['operational', 'degraded', 'outage'].includes(String(value))
-    ? String(value) as ServiceState
-    : 'unknown'
-}
-
-function serviceStateLabel(value: unknown) {
-  return {
-    operational: 'Operational',
-    degraded: 'Degraded',
-    outage: 'Outage',
-    unknown: 'Unknown'
-  }[normalizedServiceState(value)]
-}
-
-function serviceHistory(service: StatusService) {
-  return normalizeArray<StatusHistory>(service.history).slice(-12)
-}
-
 function methodTone(value: unknown) {
   const method = typeof value === 'string' ? value.toUpperCase() : ''
   if (method === 'GET') return 'get'
@@ -927,14 +841,14 @@ onBeforeUnmount(() => {
             </section>
 
             <template v-else>
-              <div v-if="adminError || statusError" class="warning-banner" role="status">
+              <div v-if="adminError" class="warning-banner" role="status">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M12 4 21 20H3L12 4Z" />
                   <path d="M12 9v5M12 17h.01" />
                 </svg>
                 <div>
                   <strong>Some telemetry is incomplete</strong>
-                  <span>{{ [adminError, statusError].filter(Boolean).join(' ') }}</span>
+                  <span>{{ adminError }}</span>
                 </div>
                 <button type="button" :disabled="isRefreshing" @click="refreshDashboard(true)">Retry</button>
               </div>
@@ -981,7 +895,7 @@ onBeforeUnmount(() => {
                   </article>
                 </div>
 
-                <div class="overview-grid">
+                <div class="overview-grid overview-grid--single">
                   <article class="dashboard-card activity-card">
                     <header class="card-heading">
                       <div>
@@ -1011,36 +925,6 @@ onBeforeUnmount(() => {
                     </footer>
                   </article>
 
-                  <article class="dashboard-card health-card">
-                    <header class="card-heading">
-                      <div>
-                        <span>Platform health</span>
-                        <h3>{{ overallServiceLabel }}</h3>
-                      </div>
-                      <span class="state-badge" :class="`is-${overallServiceState}`">
-                        <i aria-hidden="true"></i>{{ serviceStateLabel(overallServiceState) }}
-                      </span>
-                    </header>
-                    <div class="health-summary">
-                      <div>
-                        <span class="health-number is-success">{{ formatExactNumber(publicStatus?.summary?.operational) }}</span>
-                        <small>Operational</small>
-                      </div>
-                      <div>
-                        <span class="health-number is-warning">{{ formatExactNumber(publicStatus?.summary?.degraded) }}</span>
-                        <small>Degraded</small>
-                      </div>
-                      <div>
-                        <span class="health-number is-danger">{{ formatExactNumber(publicStatus?.summary?.outages) }}</span>
-                        <small>Outages</small>
-                      </div>
-                    </div>
-                    <dl class="compact-details">
-                      <div><dt>Knowledge engine</dt><dd>{{ knowledge.rebuilding ? 'Rebuilding' : knowledge.loaded ? 'Ready' : 'Unavailable' }}</dd></div>
-                      <div><dt>Integrations online</dt><dd>{{ integrationEntries.filter((entry) => entry.enabled).length }} / {{ integrationEntries.length }}</dd></div>
-                      <div><dt>Server uptime</dt><dd>{{ formatUptime(runtime.uptimeSeconds) }}</dd></div>
-                    </dl>
-                  </article>
                 </div>
 
                 <div class="overview-grid overview-grid--lower">
@@ -1208,37 +1092,6 @@ onBeforeUnmount(() => {
                 role="tabpanel"
                 aria-labelledby="admin-tab-services"
               >
-                <div class="service-summary-grid">
-                  <article class="service-summary-card" :class="`is-${overallServiceState}`">
-                    <span class="status-orb" aria-hidden="true"><i></i></span>
-                    <div><span>Overall status</span><strong>{{ serviceStateLabel(overallServiceState) }}</strong><small>{{ formatDate(publicStatus?.updatedAt, true) }}</small></div>
-                  </article>
-                  <article class="service-summary-card"><span class="summary-number is-success">{{ formatExactNumber(publicStatus?.summary?.operational) }}</span><div><span>Operational</span><strong>Healthy checks</strong><small>of {{ formatExactNumber(publicStatus?.summary?.total) }} monitored</small></div></article>
-                  <article class="service-summary-card"><span class="summary-number is-warning">{{ formatExactNumber(publicStatus?.summary?.degraded) }}</span><div><span>Degraded</span><strong>Needs attention</strong><small>Slow or partial</small></div></article>
-                  <article class="service-summary-card"><span class="summary-number is-danger">{{ formatExactNumber(publicStatus?.summary?.outages) }}</span><div><span>Outages</span><strong>Unavailable</strong><small>Failed live checks</small></div></article>
-                </div>
-
-                <article class="dashboard-card services-card">
-                  <header class="card-heading"><div><span>Public monitor</span><h3>Connected services</h3></div><span class="record-count">{{ statusServices.length }} services</span></header>
-                  <div v-if="statusServices.length" class="service-list">
-                    <article v-for="(service, index) in statusServices" :key="service.id || `${service.name}-${index}`" class="service-row-card">
-                      <span class="service-dot" :class="`is-${normalizedServiceState(service.status)}`" aria-hidden="true"></span>
-                      <div class="service-identity">
-                        <div><strong>{{ service.name || 'Unnamed service' }}</strong><span>{{ service.group || (service.kind === 'platform' ? 'Nuvio platform' : 'Community') }}</span></div>
-                        <a v-if="service.url" :href="service.url" target="_blank" rel="noopener noreferrer" :aria-label="`Open ${service.name || 'service'}`">
-                          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5h5v5M19 5l-9 9M19 14v5H5V5h5" /></svg>
-                        </a>
-                      </div>
-                      <div class="service-history" aria-label="Recent service checks">
-                        <span v-for="(check, checkIndex) in serviceHistory(service)" :key="checkIndex" :class="`is-${normalizedServiceState(check.status)}`" :title="`${serviceStateLabel(check.status)} · ${formatDuration(check.latencyMs)} · ${formatDate(check.checkedAt, true)}`"></span>
-                      </div>
-                      <div class="service-latency"><span>Latency</span><strong>{{ formatDuration(service.latencyMs) }}</strong></div>
-                      <span class="state-badge" :class="`is-${normalizedServiceState(service.status)}`"><i aria-hidden="true"></i>{{ serviceStateLabel(service.status) }}</span>
-                    </article>
-                  </div>
-                  <div v-else class="inline-empty inline-empty--large">{{ statusError || 'No public service checks are available.' }}</div>
-                </article>
-
                 <div class="services-secondary-grid">
                   <article class="dashboard-card integrations-card">
                     <header class="card-heading"><div><span>Connectivity</span><h3>Integrations</h3></div><span class="record-count">{{ integrationEntries.filter((entry) => entry.enabled).length }} online</span></header>
@@ -2016,6 +1869,10 @@ onBeforeUnmount(() => {
 
 .overview-grid--lower {
   grid-template-columns: minmax(0, 1.45fr) minmax(300px, .75fr);
+}
+
+.overview-grid--single {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .dashboard-card {

@@ -1,3 +1,5 @@
+const IBBY_LABS_STATUS_URL = 'https://uptime.ibbylabs.dev/v1/status';
+const IBBY_LABS_STATUS_PAGE = 'https://uptime.ibbylabs.dev/';
 const COMMUNITY_STATUS_URL =
   'https://status.stremio-status.com/api/v1/endpoints/statuses?page=1&pageSize=12';
 const COMMUNITY_STATUS_PAGE = 'https://status.stremio-status.com/';
@@ -5,6 +7,9 @@ const NUVIO_URL = 'https://nuvio.tv/';
 const FETCH_TIMEOUT_MS = 12_000;
 const DEFAULT_CACHE_TTL_MS = 60_000;
 const HISTORY_LIMIT = 12;
+
+export const DEFAULT_STATUS_PROVIDER = 'ibbylabs';
+export const STATUS_PROVIDERS = new Set([DEFAULT_STATUS_PROVIDER, 'stremio-status']);
 
 // The Gatus status response exposes hostnames but not the checked path. Keep the
 // exact public instance URLs here so the UI can link to the same endpoints that
@@ -78,6 +83,62 @@ function endpointUrl(name, latestResult) {
   return hostname ? `https://${hostname}` : null;
 }
 
+function hostnameFromUrl(value) {
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return null;
+  }
+}
+
+function ibbyLabsState(last, maintenance) {
+  const state = String(last?.state || last?.rawState || '').toUpperCase();
+  if (maintenance || state === 'MAINTENANCE') return 'degraded';
+  if (state === 'DOWN' || state === 'OUTAGE' || last?.up === false) return 'outage';
+  if (state === 'DEGRADED' || last?.flapping || last?.recovering) return 'degraded';
+  if (state === 'UP' || last?.up === true) return 'operational';
+  return 'unknown';
+}
+
+export function normalizeIbbyLabsStatus(payload) {
+  if (!Array.isArray(payload?.services)) {
+    throw new Error('Ibby Labs status response did not contain a services array.');
+  }
+
+  const groupOrders = new Map();
+  const services = payload.services
+    .filter((service) => !service?.hideFromStatusPage)
+    .map((service) => {
+      const group = String(service?.group || 'Other');
+      if (!groupOrders.has(group)) groupOrders.set(group, groupOrders.size + 1);
+
+      const last = service?.last || null;
+      const status = ibbyLabsState(last, service?.maintenance);
+      const checkedAt = last?.checkedAt || payload.generatedAt || null;
+      const latency = Number(last?.latency);
+      const latencyMs = Number.isFinite(latency) ? Math.max(0, Math.round(latency)) : null;
+      const isNuvioWebsite = service?.id === 'nuvio-website';
+
+      return {
+        id: String(service?.id || `${group}-${service?.name || 'service'}`),
+        name: isNuvioWebsite ? 'Nuvio' : String(service?.name || 'Unnamed service'),
+        group: isNuvioWebsite ? 'Nuvio Platform' : group,
+        groupOrder: isNuvioWebsite ? 0 : groupOrders.get(group),
+        kind: isNuvioWebsite ? 'platform' : 'community',
+        url: service?.url || null,
+        hostname: hostnameFromUrl(service?.url),
+        status,
+        latencyMs,
+        checkedAt,
+        history: checkedAt ? [{ status, latencyMs, checkedAt }] : []
+      };
+    });
+
+  return services.sort((a, b) =>
+    a.groupOrder - b.groupOrder || a.name.localeCompare(b.name)
+  );
+}
+
 export function normalizeCommunityEndpoint(endpoint) {
   const results = Array.isArray(endpoint?.results)
     ? endpoint.results
@@ -126,6 +187,26 @@ async function fetchCommunityEndpoints(fetchImpl) {
 
   if (!response.ok) throw new Error(`Community status returned HTTP ${response.status}.`);
   return normalizeCommunityEndpoints(await response.json());
+}
+
+async function fetchIbbyLabsStatus(fetchImpl) {
+  const response = await requestWithTimeout(fetchImpl, IBBY_LABS_STATUS_URL, {
+    headers: {
+      Accept: 'application/json',
+      'User-Agent': 'Nuvio-Wiki-Status/1.0'
+    }
+  });
+
+  if (!response.ok) throw new Error(`Ibby Labs status returned HTTP ${response.status}.`);
+  const payload = await response.json();
+  return {
+    services: normalizeIbbyLabsStatus(payload),
+    updatedAt: payload.generatedAt || null,
+    source: {
+      label: payload?.source?.name || 'Ibby Labs uptime monitor',
+      url: payload?.source?.url || IBBY_LABS_STATUS_PAGE
+    }
+  };
 }
 
 async function checkNuvio(fetchImpl, now, priorHistory) {
@@ -186,15 +267,34 @@ export function createStatusService({
   now = () => Date.now(),
   cacheTtlMs = DEFAULT_CACHE_TTL_MS
 } = {}) {
-  let cache = null;
-  let inFlight = null;
+  const caches = new Map();
+  const inFlightRequests = new Map();
   let nuvioHistory = [];
 
-  return async function getStatusOverview({ force = false } = {}) {
-    if (!force && cache && now() - cache.cachedAt < cacheTtlMs) return cache.payload;
-    if (inFlight) return inFlight;
+  return async function getStatusOverview({ force = false, provider = DEFAULT_STATUS_PROVIDER } = {}) {
+    const selectedProvider = STATUS_PROVIDERS.has(provider) ? provider : DEFAULT_STATUS_PROVIDER;
+    const cached = caches.get(selectedProvider);
+    if (!force && cached && now() - cached.cachedAt < cacheTtlMs) return cached.payload;
+    if (inFlightRequests.has(selectedProvider)) return inFlightRequests.get(selectedProvider);
 
-    inFlight = (async () => {
+    const inFlight = (async () => {
+      if (selectedProvider === DEFAULT_STATUS_PROVIDER) {
+        const result = await fetchIbbyLabsStatus(fetchImpl);
+        if (result.services.length === 0) throw new Error('No Ibby Labs status data is currently available.');
+
+        const payload = {
+          provider: selectedProvider,
+          updatedAt: result.updatedAt || new Date(now()).toISOString(),
+          partial: false,
+          notices: [],
+          summary: summarize(result.services),
+          services: result.services,
+          source: result.source
+        };
+        caches.set(selectedProvider, { cachedAt: now(), payload });
+        return payload;
+      }
+
       const [communityResult, nuvioResult] = await Promise.allSettled([
         fetchCommunityEndpoints(fetchImpl),
         checkNuvio(fetchImpl, now, nuvioHistory)
@@ -219,6 +319,7 @@ export function createStatusService({
       if (services.length === 0) throw new Error('No status data is currently available.');
 
       const payload = {
+        provider: selectedProvider,
         updatedAt: new Date(now()).toISOString(),
         partial: notices.length > 0,
         notices,
@@ -230,15 +331,15 @@ export function createStatusService({
         }
       };
 
-      cache = { cachedAt: now(), payload };
+      caches.set(selectedProvider, { cachedAt: now(), payload });
       return payload;
     })().finally(() => {
-      inFlight = null;
+      inFlightRequests.delete(selectedProvider);
     });
 
+    inFlightRequests.set(selectedProvider, inFlight);
     return inFlight;
   };
 }
 
 export const getStatusOverview = createStatusService();
-

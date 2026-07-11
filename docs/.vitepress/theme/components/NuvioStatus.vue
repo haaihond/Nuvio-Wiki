@@ -33,6 +33,7 @@ interface StatusSummary {
 }
 
 interface StatusPayload {
+  provider: StatusProvider
   updatedAt: string
   partial: boolean
   notices: string[]
@@ -43,6 +44,14 @@ interface StatusPayload {
     url: string
   }
 }
+
+type StatusProvider = 'ibbylabs' | 'stremio-status'
+
+const STATUS_PROVIDER_STORAGE_KEY = 'nuvio-status-provider'
+const statusProviders: { id: StatusProvider; label: string }[] = [
+  { id: 'ibbylabs', label: 'Ibby Labs' },
+  { id: 'stremio-status', label: 'Stremio Status' }
+]
 
 interface ServiceGroup {
   name: string
@@ -58,6 +67,7 @@ const searchQuery = ref('')
 const selectedGroup = ref('all')
 const issuesOnly = ref(false)
 const lastLoadedAt = ref(0)
+const selectedProvider = ref<StatusProvider>('ibbylabs')
 
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 let requestController: AbortController | undefined
@@ -161,13 +171,16 @@ async function loadStatus(manual = false) {
   errorMessage.value = ''
 
   try {
-    const response = await fetch(withBase('/api/status'), {
+    const provider = selectedProvider.value
+    const response = await fetch(`${withBase('/api/status')}?provider=${encodeURIComponent(provider)}`, {
       signal: requestController.signal,
       headers: { Accept: 'application/json' },
       cache: 'no-store'
     })
     if (!response.ok) throw new Error(`Status request failed with HTTP ${response.status}`)
-    statusData.value = await response.json() as StatusPayload
+    const payload = await response.json() as StatusPayload
+    if (provider !== selectedProvider.value) return
+    statusData.value = payload
     lastLoadedAt.value = Date.now()
   } catch (error) {
     if ((error as Error).name !== 'AbortError') {
@@ -177,6 +190,15 @@ async function loadStatus(manual = false) {
     isLoading.value = false
     isRefreshing.value = false
   }
+}
+
+function selectProvider(provider: StatusProvider) {
+  if (provider === selectedProvider.value) return
+  selectedProvider.value = provider
+  localStorage.setItem(STATUS_PROVIDER_STORAGE_KEY, provider)
+  statusData.value = null
+  selectedGroup.value = 'all'
+  loadStatus()
 }
 
 function handleVisibilityChange() {
@@ -237,6 +259,10 @@ function groupAvailableCount(group: ServiceGroup) {
 }
 
 onMounted(() => {
+  const savedProvider = localStorage.getItem(STATUS_PROVIDER_STORAGE_KEY)
+  if (savedProvider === 'ibbylabs' || savedProvider === 'stremio-status') {
+    selectedProvider.value = savedProvider
+  }
   loadStatus()
   refreshTimer = setInterval(() => loadStatus(), 60_000)
   document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -275,6 +301,21 @@ onUnmounted(() => {
               <path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6" />
             </svg>
             {{ isRefreshing ? 'Refreshing' : 'Refresh' }}
+          </button>
+        </div>
+
+        <div class="provider-picker" role="group" aria-label="Status data provider">
+          <span>Monitor</span>
+          <button
+            v-for="provider in statusProviders"
+            :key="provider.id"
+            type="button"
+            :class="{ active: selectedProvider === provider.id }"
+            :aria-pressed="selectedProvider === provider.id"
+            @click="selectProvider(provider.id)"
+          >
+            {{ provider.label }}
+            <small v-if="provider.id === 'ibbylabs'">Default</small>
           </button>
         </div>
 
@@ -634,6 +675,55 @@ onUnmounted(() => {
 }
 
 .refresh-button svg.spinning { animation: spin 800ms linear infinite; }
+
+.provider-picker {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 24px;
+}
+
+.provider-picker > span {
+  margin-right: 3px;
+  color: var(--vp-c-text-3);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.provider-picker button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 11px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  background: var(--vp-c-bg-elv);
+  color: var(--vp-c-text-2);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.provider-picker button:hover { background: var(--vp-c-bg-soft); }
+.provider-picker button.active {
+  border-color: color-mix(in srgb, var(--vp-c-brand-1) 35%, var(--vp-c-divider));
+  background: var(--vp-c-brand-soft);
+  color: var(--vp-c-brand-1);
+}
+
+.provider-picker small {
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
 
 .overall-banner {
   display: flex;
@@ -1290,6 +1380,8 @@ onUnmounted(() => {
 
   .status-heading-row h1 { font-size: 42px; }
   .refresh-button { width: 100%; }
+  .provider-picker { flex-wrap: wrap; }
+  .provider-picker > span { width: 100%; }
 
   .overall-banner { margin-top: 28px; padding: 18px; }
   .overall-banner__message strong { white-space: normal; }

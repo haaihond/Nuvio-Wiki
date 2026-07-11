@@ -2,8 +2,28 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createStatusService,
+  normalizeIbbyLabsStatus,
   normalizeCommunityEndpoints
 } from './status.js';
+
+const ibbyLabsPayload = {
+  generatedAt: '2026-07-10T12:00:00.000Z',
+  source: { name: 'IbbyLabs Uptime Tracker', url: 'https://uptime.ibbylabs.dev' },
+  services: [
+    {
+      id: 'nuvio-website', name: 'Nuvio Website', group: 'Nuvio', url: 'https://nuvio.tv/',
+      last: { state: 'UP', up: true, latency: 125, checkedAt: '2026-07-10T12:00:00.000Z' }
+    },
+    {
+      id: 'community-addon', name: 'Community Addon', group: 'Addons', url: 'https://addon.example/',
+      last: { state: 'DEGRADED', up: true, latency: 850, checkedAt: '2026-07-10T12:00:00.000Z' }
+    },
+    {
+      id: 'hidden-service', name: 'Hidden', group: 'Internal', hideFromStatusPage: true,
+      last: { state: 'DOWN', up: false }
+    }
+  ]
+};
 
 const communityEndpoint = {
   name: 'AIOStreams (ElfHosted)',
@@ -57,6 +77,39 @@ test('normalizes community checks and removes Stremio platform services', () => 
   );
 });
 
+test('normalizes Ibby Labs services and promotes the Nuvio website', () => {
+  const services = normalizeIbbyLabsStatus(ibbyLabsPayload);
+
+  assert.equal(services.length, 2);
+  assert.equal(services[0].kind, 'platform');
+  assert.equal(services[0].name, 'Nuvio');
+  assert.equal(services[0].latencyMs, 125);
+  assert.equal(services[1].status, 'degraded');
+  assert.equal(services[1].hostname, 'addon.example');
+});
+
+test('uses Ibby Labs by default and caches its overview', async () => {
+  const calls = [];
+  const getStatusOverview = createStatusService({
+    fetchImpl: async (url) => {
+      calls.push(url);
+      return { ok: true, status: 200, json: async () => ibbyLabsPayload };
+    },
+    now: () => Date.parse('2026-07-10T12:00:00.000Z')
+  });
+
+  const first = await getStatusOverview();
+  const cached = await getStatusOverview();
+
+  assert.equal(calls.length, 1);
+  assert.equal(first, cached);
+  assert.equal(first.provider, 'ibbylabs');
+  assert.equal(first.source.url, 'https://uptime.ibbylabs.dev');
+  assert.deepEqual(first.summary, {
+    total: 2, operational: 1, degraded: 1, outages: 0, unknown: 0
+  });
+});
+
 test('builds and caches a combined Nuvio and community overview', async () => {
   const calls = [];
   let currentTime = Date.parse('2026-07-10T12:00:00.000Z');
@@ -84,8 +137,8 @@ test('builds and caches a combined Nuvio and community overview', async () => {
     cacheTtlMs: 60_000
   });
 
-  const first = await getStatusOverview();
-  const cached = await getStatusOverview();
+  const first = await getStatusOverview({ provider: 'stremio-status' });
+  const cached = await getStatusOverview({ provider: 'stremio-status' });
 
   assert.equal(calls.length, 2);
   assert.equal(first, cached);
@@ -100,7 +153,7 @@ test('builds and caches a combined Nuvio and community overview', async () => {
   });
 
   currentTime += 61_000;
-  const refreshed = await getStatusOverview();
+  const refreshed = await getStatusOverview({ provider: 'stremio-status' });
   assert.equal(calls.length, 4);
   assert.equal(refreshed.services[0].history.length, 2);
 });
@@ -120,10 +173,9 @@ test('returns Nuvio status with a partial-data notice when the community monitor
     now: () => Date.parse('2026-07-10T12:00:00.000Z')
   });
 
-  const result = await getStatusOverview();
+  const result = await getStatusOverview({ provider: 'stremio-status' });
   assert.equal(result.partial, true);
   assert.equal(result.services.length, 1);
   assert.equal(result.services[0].name, 'Nuvio');
   assert.match(result.notices[0], /Community service data/);
 });
-
