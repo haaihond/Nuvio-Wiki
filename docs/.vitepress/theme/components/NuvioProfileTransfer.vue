@@ -287,15 +287,15 @@ function setRestoreStrategy(nextStrategy: RestoreStrategy) {
 
 function openImportReview() {
   if (!isConnected.value) {
-    importError.value = 'Sign in before restoring a backup.'
+    importError.value = 'Sign in before importing.'
     return
   }
   if (!importProfile.value) {
-    importError.value = 'Choose the profile you want to restore into.'
+    importError.value = 'Choose the profile you want to import into.'
     return
   }
   if (!importSelection.value.size) {
-    importError.value = 'Choose at least one type of data to restore.'
+    importError.value = 'Choose at least one type of data to import.'
     return
   }
   importError.value = ''
@@ -885,10 +885,10 @@ async function runExport() {
     lastCreatedBackup.value = backup
     lastCreatedBackupName.value = filename
 
-    exportStatus.value = `Backup downloaded for ${backup.source.profileName}.`
+    exportStatus.value = `Export downloaded for ${backup.source.profileName}.`
   } catch (error) {
     exportStatus.value = ''
-    exportError.value = `No backup was downloaded. ${errorMessage(error)}`
+    exportError.value = `No file was downloaded. ${errorMessage(error)}`
   } finally {
     exportBusy.value = false
   }
@@ -896,18 +896,18 @@ async function runExport() {
 
 function validateBackup(value: unknown): ProfileBackup {
   if (!isRecord(value) || value.format !== 'nuvio-profile-export') {
-    throw new Error('This is not a Nuvio backup file.')
+    throw new Error('This is not a Nuvio profile file.')
   }
   if (value.version !== 1) {
-    throw new Error('This backup was created by a newer version of the tool and cannot be opened yet.')
+    throw new Error('This file was created by a newer version of the tool and cannot be opened yet.')
   }
   if (!isRecord(value.source)
     || !Number.isInteger(Number(value.source.profileIndex))
     || typeof value.source.profileName !== 'string') {
-    throw new Error('The backup has incomplete profile information.')
+    throw new Error('The file has incomplete profile information.')
   }
   if (!isRecord(value.data)) {
-    throw new Error('The data in this backup could not be read.')
+    throw new Error('The data in this file could not be read.')
   }
 
   const data: Partial<Record<CategoryKey, unknown>> = {}
@@ -918,7 +918,7 @@ function validateBackup(value: unknown): ProfileBackup {
       throw new Error('The saved profile information could not be read.')
     }
     if (ARRAY_CATEGORIES.has(key) && !Array.isArray(section)) {
-      throw new Error(`${categoryDefinition(key).label} could not be read from this backup.`)
+      throw new Error(`${categoryDefinition(key).label} could not be read from this file.`)
     }
     if (ARRAY_CATEGORIES.has(key)
       && Array.isArray(section)
@@ -942,7 +942,7 @@ function validateBackup(value: unknown): ProfileBackup {
     .map(({ key }) => key)
     .filter(key => Object.prototype.hasOwnProperty.call(data, key))
   if (!selectedCategories.length) {
-    throw new Error('This backup does not contain any data this tool can restore.')
+    throw new Error('This file does not contain any data this tool can import.')
   }
 
   return {
@@ -991,7 +991,7 @@ async function loadImportFile(file?: File) {
     importFileName.value = ''
     importSelection.value = new Set()
     importError.value = error instanceof SyntaxError
-      ? 'This file is damaged or is not a Nuvio backup.'
+      ? 'This file is damaged or is not a Nuvio profile file.'
       : errorMessage(error)
   } finally {
     if (fileInput.value) fileInput.value.value = ''
@@ -1056,7 +1056,7 @@ async function importCategory(
         p_client_max_profiles: 6,
         p_profiles: replacement
       })
-      return 'Profile name, picture, and sharing choices restored.'
+      return 'Profile name, picture, and sharing choices imported.'
     }
     case 'addons': {
       const stagedItems = (value as Record<string, any>[]).map(cleanAddon)
@@ -1074,7 +1074,7 @@ async function importCategory(
       if (strategy === 'merge') {
         return `Merged ${stagedItems.length} staged ${stagedItems.length === 1 ? 'add-on' : 'add-ons'} and kept the rest.`
       }
-      return items.length ? `Restored ${items.length} add-ons.` : 'Removed existing add-ons because this backup had none.'
+      return items.length ? `Imported ${items.length} add-ons.` : 'Removed existing add-ons because this file had none.'
     }
     case 'plugins': {
       const stagedItems = (value as Record<string, any>[]).map(cleanPlugin)
@@ -1092,7 +1092,7 @@ async function importCategory(
       if (strategy === 'merge') {
         return `Merged ${stagedItems.length} staged ${stagedItems.length === 1 ? 'plugin' : 'plugins'} and kept the rest.`
       }
-      return items.length ? `Restored ${items.length} plugins.` : 'Removed existing plugins because this backup had none.'
+      return items.length ? `Imported ${items.length} plugins.` : 'Removed existing plugins because this file had none.'
     }
     case 'library': {
       const stagedItems = (value as Record<string, any>[]).map(cleanLibraryItem)
@@ -1110,7 +1110,7 @@ async function importCategory(
       if (strategy === 'merge') {
         return `Merged ${stagedItems.length} staged library ${stagedItems.length === 1 ? 'item' : 'items'} and kept the rest.`
       }
-      return items.length ? `Restored ${items.length} library items.` : 'Cleared the library because this backup had no saved items.'
+      return items.length ? `Imported ${items.length} library items.` : 'Cleared the library because this file had no saved items.'
     }
     case 'watchProgress': {
       const entries = (value as Record<string, any>[]).map(cleanProgressItem)
@@ -1121,7 +1121,7 @@ async function importCategory(
           p_entries: chunk
         })
       }
-      return entries.length ? `Added or updated ${entries.length} Continue Watching items.` : 'No Continue Watching items were in this backup.'
+      return entries.length ? `Added or updated ${entries.length} Continue Watching items.` : 'No Continue Watching items were in this file.'
     }
     case 'watchHistory': {
       const items = (value as Record<string, any>[]).map(cleanHistoryItem)
@@ -1132,7 +1132,7 @@ async function importCategory(
           p_items: chunk
         })
       }
-      return items.length ? `Added or updated ${items.length} watched items.` : 'No watched items were in this backup.'
+      return items.length ? `Added or updated ${items.length} watched items.` : 'No watched items were in this file.'
     }
     case 'profileSettings': {
       const stagedBlobs = value as PlatformSettings[]
@@ -1162,7 +1162,7 @@ async function importCategory(
       if (strategy === 'merge') {
         return `Merged staged app settings for ${blobs.length} ${blobs.length === 1 ? 'platform' : 'platforms'} and kept other settings.`
       }
-      return blobs.length ? `Restored ${blobs.length} saved app settings.` : 'No app settings were in this backup.'
+      return blobs.length ? `Imported ${blobs.length} saved app settings.` : 'No app settings were in this file.'
     }
     case 'homeCatalogSettings': {
       const stagedBlobs = value as PlatformSettings[]
@@ -1195,7 +1195,7 @@ async function importCategory(
       if (strategy === 'merge') {
         return `Merged staged home screen settings for ${blobs.length} ${blobs.length === 1 ? 'platform' : 'platforms'} and kept other settings.`
       }
-      return blobs.length ? `Restored ${blobs.length} saved home screen layouts.` : 'No home screen layouts were in this backup.'
+      return blobs.length ? `Imported ${blobs.length} saved home screen layouts.` : 'No home screen layouts were in this file.'
     }
     case 'collections': {
       const stagedCollections = value as Record<string, any>[]
@@ -1221,7 +1221,7 @@ async function importCategory(
       if (strategy === 'merge') {
         return `Merged ${stagedCollections.length} staged ${stagedCollections.length === 1 ? 'collection' : 'collections'} and kept the rest.`
       }
-      return collections.length ? `Restored ${collections.length} collections.` : 'Removed existing collections because this backup had none.'
+      return collections.length ? `Imported ${collections.length} collections.` : 'Removed existing collections because this file had none.'
     }
   }
 }
@@ -1229,19 +1229,19 @@ async function importCategory(
 async function runImport() {
   const backup = importBackup.value
   if (!backup) {
-    importError.value = 'Choose a Nuvio backup file first.'
+    importError.value = 'Choose a Nuvio profile file first.'
     return
   }
   if (!selectedImportDefinitions.value.length) {
-    importError.value = 'Choose at least one type of data to restore.'
+    importError.value = 'Choose at least one type of data to import.'
     return
   }
   if (!importReviewOpen.value) {
-    importError.value = 'Review the restore summary before continuing.'
+    importError.value = 'Review the import summary before continuing.'
     return
   }
   if (!importProfile.value) {
-    importError.value = 'Choose the profile you want to restore into.'
+    importError.value = 'Choose the profile you want to import into.'
     return
   }
 
@@ -1259,7 +1259,7 @@ async function runImport() {
     const value = backup.data[key]
     const definition = categoryDefinition(key)
     importProgress.current = index + 1
-    importStatus.value = `Restoring ${index + 1} of ${keysToImport.length}: ${definition.label}…`
+    importStatus.value = `Importing ${index + 1} of ${keysToImport.length}: ${definition.label}…`
 
     try {
       const detail = await importCategory(key, value, destinationProfileId, strategy)
@@ -1277,8 +1277,8 @@ async function runImport() {
   const failures = importResults.value.filter(result => result.status === 'error').length
   const successes = importResults.value.length - failures
   importStatus.value = failures
-    ? `${successes} restored · ${failures} could not be restored. Successful changes were kept.`
-    : `Restore complete: ${successes} ${successes === 1 ? 'type of data' : 'types of data'} restored.`
+    ? `${successes} imported · ${failures} could not be imported. Successful changes were kept.`
+    : `Import complete: ${successes} ${successes === 1 ? 'type of data' : 'types of data'} imported.`
 
   if (importResults.value.some(result => result.key === 'profile' && result.status === 'success')) {
     try {
@@ -1301,8 +1301,8 @@ async function runImport() {
         <path d="m9 12 2 2 4-4" />
       </svg>
       <div>
-        <strong>Your backup stays private</strong>
-        <span>Your password goes directly to Nuvio and is cleared after sign-in. Your Nuvio password, session, and profile PIN are never added to a backup. Add-on or plugin links and app settings can contain keys for other services, so keep the downloaded file private.</span>
+        <strong>Your export stays private</strong>
+        <span>Your password goes directly to Nuvio and is cleared after sign-in. Your Nuvio password, session, and profile PIN are never added to an export. Add-on or plugin links and app settings can contain keys for other services, so keep the downloaded file private.</span>
       </div>
     </div>
 
@@ -1345,7 +1345,7 @@ async function runImport() {
       <div v-else class="connected-row">
         <div class="signed-in-copy">
           <strong>Signed in</strong>
-          <span>Choose the profile you want inside Create backup or Restore backup.</span>
+          <span>Choose the profile you want inside Export profile or Import profile.</span>
         </div>
         <button class="secondary-button" type="button" :disabled="exportBusy || importBusy" @click="disconnect">
           Disconnect
@@ -1359,7 +1359,7 @@ async function runImport() {
       <div class="section-heading transfer-title-row">
         <div>
           <span class="eyebrow">Step 2</span>
-          <h3 id="transfer-heading">Create or restore a backup</h3>
+          <h3 id="transfer-heading">Export or import a profile</h3>
         </div>
       </div>
 
@@ -1373,7 +1373,7 @@ async function runImport() {
           @click="setMode('export')"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" /></svg>
-          Create backup
+          Export profile
         </button>
         <button
           type="button"
@@ -1384,14 +1384,14 @@ async function runImport() {
           @click="setMode('import')"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m0 0 4 4m-4-4L8 7M5 21h14" /></svg>
-          Restore backup
+          Import profile
         </button>
       </div>
 
       <div v-if="mode === 'export'" class="mode-panel" role="tabpanel">
         <div class="profile-choice-box">
           <label>
-            <span>Profile to back up</span>
+            <span>Profile to export</span>
             <select v-model.number="exportProfileId" :disabled="!isConnected || exportBusy">
               <option
                 v-for="profile in profiles"
@@ -1403,7 +1403,7 @@ async function runImport() {
             </select>
           </label>
           <p v-if="!isConnected">Sign in first, then choose a profile.</p>
-          <p v-else>The backup is downloaded to this device. Nothing in Nuvio is changed.</p>
+          <p v-else>The exported file is downloaded to this device. Nothing in Nuvio is changed.</p>
         </div>
 
         <div class="choice-summary">
@@ -1451,7 +1451,7 @@ async function runImport() {
           <span>
             This profile uses
             <template v-if="exportSelection.has('addons') && exportProfile?.uses_primary_addons">add-ons</template><template v-if="exportSelection.has('addons') && exportProfile?.uses_primary_addons && exportSelection.has('plugins') && exportProfile?.uses_primary_plugins"> and </template><template v-if="exportSelection.has('plugins') && exportProfile?.uses_primary_plugins">plugins</template>
-            from Main profile. Create a backup of Main profile if you also want a copy of those shared items.
+            from Main profile. Export the Main profile if you also want a copy of those shared items.
           </span>
         </div>
 
@@ -1475,7 +1475,7 @@ async function runImport() {
             @click="runExport"
           >
             <span v-if="exportBusy" class="spinner" aria-hidden="true"></span>
-            {{ exportBusy ? 'Creating backup…' : 'Download backup' }}
+            {{ exportBusy ? 'Exporting profile…' : 'Download export' }}
           </button>
         </div>
       </div>
@@ -1483,18 +1483,18 @@ async function runImport() {
       <div v-else class="mode-panel" role="tabpanel">
         <div class="panel-intro">
           <div>
-            <h4>Choose your backup file</h4>
+            <h4>Choose your exported file</h4>
             <p>The file is opened on this device. Everything found in it is selected by default, and you can choose what to skip.</p>
           </div>
         </div>
 
         <div v-if="lastCreatedBackup" class="recent-backup-box">
           <div>
-            <strong>Backup just created for {{ lastCreatedBackup.source.profileName }}</strong>
-            <span>You can restore it now without finding the downloaded file.</span>
+            <strong>Export just created for {{ lastCreatedBackup.source.profileName }}</strong>
+            <span>You can import it now without finding the downloaded file.</span>
           </div>
           <button class="secondary-button" type="button" :disabled="importBusy" @click="useLastCreatedBackup">
-            Use this backup
+            Use this export
           </button>
         </div>
 
@@ -1516,8 +1516,8 @@ async function runImport() {
           @drop.prevent="handleDrop"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0 4 4m-4-4L8 8M4 15v5h16v-5" /></svg>
-          <strong>{{ importFileName || 'Choose or drop a Nuvio backup' }}</strong>
-          <span>{{ importFileName ? 'Choose a different backup' : 'Nuvio backup file · maximum 50 MB' }}</span>
+          <strong>{{ importFileName || 'Choose or drop a Nuvio profile file' }}</strong>
+          <span>{{ importFileName ? 'Choose a different file' : 'Nuvio profile file · maximum 50 MB' }}</span>
         </button>
 
         <p v-if="importError" class="error-panel" role="alert">{{ importError }}</p>
@@ -1525,7 +1525,7 @@ async function runImport() {
         <template v-if="importBackup">
           <div class="backup-summary">
             <div>
-              <span>Backup from</span>
+              <span>Export from</span>
               <strong>{{ importBackup.source.profileName }}</strong>
             </div>
             <div>
@@ -1535,12 +1535,12 @@ async function runImport() {
           </div>
 
           <div v-if="importBackup.warnings?.length" class="warning-panel">
-            <strong>Notes from this backup</strong>
+            <strong>Notes from this export</strong>
             <span v-for="warning in importBackup.warnings" :key="warning">{{ warning }}</span>
           </div>
 
           <fieldset class="restore-strategy" :disabled="importBusy">
-            <legend>How should this backup be applied?</legend>
+            <legend>How should this import be applied?</legend>
             <div class="strategy-options">
               <label class="strategy-option" :class="{ selected: restoreStrategy === 'merge' }">
                 <input
@@ -1555,7 +1555,7 @@ async function runImport() {
                     <strong>Clean merge</strong>
                     <em>Recommended</em>
                   </span>
-                  <small>Add or update only staged data from the backup. Everything else stays in place, and empty staged sections do nothing.</small>
+                  <small>Add or update only staged data from the file. Everything else stays in place, and empty staged sections do nothing.</small>
                 </span>
               </label>
               <label class="strategy-option" :class="{ selected: restoreStrategy === 'replace' }">
@@ -1575,13 +1575,13 @@ async function runImport() {
                 </span>
               </label>
             </div>
-            <p>Continue Watching and Watch history always add or update records; profile details update only the fields stored in the backup.</p>
+            <p>Continue Watching and Watch history always add or update records; profile details update only the fields stored in the file.</p>
           </fieldset>
 
           <div class="choice-summary import-selection-heading">
             <div>
-              <h4>{{ importSelection.size === includedImportDefinitions.length ? 'Everything in this backup will be restored' : `${importSelection.size} types of data will be restored` }}</h4>
-              <p>Nothing is restored until you review the final summary and press Restore.</p>
+              <h4>{{ importSelection.size === includedImportDefinitions.length ? 'Everything in this file will be imported' : `${importSelection.size} types of data will be imported` }}</h4>
+              <p>Nothing is imported until you review the final summary and press Import.</p>
             </div>
             <button class="choice-toggle" type="button" :aria-expanded="showImportChoices" @click="showImportChoices = !showImportChoices">
               {{ showImportChoices ? 'Hide choices' : 'Choose what to skip' }}
@@ -1590,7 +1590,7 @@ async function runImport() {
 
           <div v-if="showImportChoices" class="choice-details">
             <div class="selection-actions">
-              <button type="button" @click="selectAllImport">Restore everything</button>
+              <button type="button" @click="selectAllImport">Import everything</button>
               <button type="button" @click="clearImportSelection">Clear all</button>
             </div>
             <div class="category-grid import-grid">
@@ -1625,7 +1625,7 @@ async function runImport() {
 
           <div class="destination-box">
             <label>
-              <span>Restore into</span>
+              <span>Import into</span>
               <select v-model="importProfileId" :disabled="!isConnected || importBusy" @change="resetImportReview">
                 <option value="" disabled>Choose a profile…</option>
                 <option
@@ -1637,7 +1637,7 @@ async function runImport() {
                 </option>
               </select>
             </label>
-            <p v-if="!isConnected">Sign in before choosing where to restore the backup.</p>
+            <p v-if="!isConnected">Sign in before choosing where to import the file.</p>
             <p v-else>No profile is selected automatically, so Main profile cannot be overwritten by accident.</p>
           </div>
 
@@ -1670,10 +1670,10 @@ async function runImport() {
             </button>
           </div>
 
-          <div v-else class="restore-review" aria-live="polite">
+          <div class="restore-review" v-else aria-live="polite">
             <span class="eyebrow">Final check</span>
-            <h4>{{ restoreStrategy === 'merge' ? 'Clean-merge' : 'Rewrite' }} this backup on {{ importProfileLabel }}?</h4>
-            <p class="restore-route"><strong>{{ importBackup.source.profileName }}</strong> backup <span aria-hidden="true">→</span> <strong>{{ importProfileLabel }}</strong></p>
+            <h4>{{ restoreStrategy === 'merge' ? 'Clean-merge' : 'Rewrite' }} this profile data on {{ importProfileLabel }}?</h4>
+            <p class="restore-route"><strong>{{ importBackup.source.profileName }}</strong> <span aria-hidden="true">→</span> <strong>{{ importProfileLabel }}</strong></p>
 
             <div class="review-effects">
               <div v-if="replaceImportLabels.length" class="review-effect">
@@ -1691,15 +1691,15 @@ async function runImport() {
             </div>
 
             <div v-if="emptyReplaceDefinitions.length" class="warning-panel review-warning">
-              <strong>This backup has empty sections</strong>
-              <span>{{ emptyReplaceDefinitions.map(definition => definition.label).join(', ') }} will be cleared on {{ importProfileLabel }} because the backup contains none.</span>
+              <strong>This file has empty sections</strong>
+              <span>{{ emptyReplaceDefinitions.map(definition => definition.label).join(', ') }} will be cleared on {{ importProfileLabel }} because the file contains none.</span>
             </div>
 
             <div class="review-actions">
               <button class="secondary-button" type="button" :disabled="importBusy" @click="resetImportReview">Go back</button>
               <button :class="['primary-button', { 'danger-button': restoreStrategy === 'replace' }]" type="button" :disabled="importBusy" @click="runImport">
                 <span v-if="importBusy" class="spinner" aria-hidden="true"></span>
-                {{ importBusy ? 'Restoring…' : `Restore to ${importProfileLabel}` }}
+                {{ importBusy ? 'Importing…' : `Import to ${importProfileLabel}` }}
               </button>
             </div>
           </div>

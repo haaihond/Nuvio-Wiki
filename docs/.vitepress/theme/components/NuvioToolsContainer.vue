@@ -24,8 +24,8 @@ const tabs = [
   },
   {
     id: 'profile-transfer',
-    label: 'Profile Backup',
-    description: 'Download or restore a Nuvio profile backup.',
+    label: 'Profile Transfer',
+    description: 'Export or import a Nuvio profile.',
     icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="tab-icon-svg"><path d="M7 7h11l-3-3m3 3-3 3M17 17H6l3 3m-3-3 3-3"/></svg>`
   }
 ]
@@ -103,11 +103,11 @@ const selectTab = (id: string) => {
         <NuvioTraktBridge :default-expanded="true" :hide-tip="true" :hide-header="true" />
       </div>
 
-      <!-- Profile Backup -->
+      <!-- Profile Transfer -->
       <div v-show="activeTab === 'profile-transfer'" class="tool-wrapper">
         <div class="tool-info-header">
-          <h2>Nuvio Profile Backup</h2>
-          <p>Download a private backup of one Nuvio profile, or restore a backup into the profile you choose.</p>
+          <h2>Nuvio Profile Transfer</h2>
+          <p>Export a Nuvio profile to a file, or import a profile from a saved file.</p>
         </div>
         <NuvioProfileTransfer />
       </div>
