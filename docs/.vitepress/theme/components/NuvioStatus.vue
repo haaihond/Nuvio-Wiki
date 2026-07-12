@@ -76,10 +76,6 @@ const communityServices = computed(() =>
   statusData.value?.services.filter((service) => service.kind === 'community') || []
 )
 
-const nuvioServices = computed(() =>
-  communityServices.value.filter((service) => service.group === 'Nuvio')
-)
-
 const groupOptions = computed(() => {
   const groups = new Map<string, { order: number; count: number }>()
   for (const service of communityServices.value) {
@@ -126,60 +122,6 @@ const visibleGroups = computed<ServiceGroup[]>(() => {
 const visibleServiceCount = computed(() =>
   visibleGroups.value.reduce((total, group) => total + group.services.length, 0)
 )
-
-const issueCount = computed(() => {
-  const summary = statusData.value?.summary
-  return summary ? summary.degraded + summary.outages + summary.unknown : 0
-})
-
-const unavailableNuvioServices = computed(() =>
-  nuvioServices.value.filter((service) => service.status === 'outage')
-)
-
-const communityOutageCount = computed(() =>
-  communityServices.value.filter((service) =>
-    service.group !== 'Nuvio' && service.status === 'outage'
-  ).length
-)
-
-const averageLatency = computed(() => {
-  const latencies = statusData.value?.services
-    .map((service) => service.latencyMs)
-    .filter((latency): latency is number => typeof latency === 'number') || []
-  if (!latencies.length) return null
-  return Math.round(latencies.reduce((sum, latency) => sum + latency, 0) / latencies.length)
-})
-
-const overallState = computed<ServiceState>(() => {
-  if (!statusData.value) return 'unknown'
-  if (unavailableNuvioServices.value.length > 0) return 'outage'
-  if (statusData.value.summary.outages > 0) return 'outage'
-  if (statusData.value.summary.degraded > 0) return 'degraded'
-  if (statusData.value.summary.unknown > 0 || statusData.value.partial) return 'unknown'
-  return 'operational'
-})
-
-const overallLabel = computed(() => {
-  if (!statusData.value) return 'Checking service health'
-  if (unavailableNuvioServices.value.length > 0) {
-    const names = unavailableNuvioServices.value.map((service) => service.name)
-    const nuvioMessage = names.length === 1
-      ? `${names[0]} is currently unavailable`
-      : `${names.length} Nuvio services are currently unavailable: ${names.join(', ')}`
-    if (communityOutageCount.value === 0) return nuvioMessage
-    const communityMessage = `${communityOutageCount.value} community ${communityOutageCount.value === 1 ? 'service is' : 'services are'} also reporting an outage`
-    return `${nuvioMessage} · ${communityMessage}`
-  }
-  if (communityOutageCount.value > 0) {
-    const count = communityOutageCount.value
-    return `${count} community ${count === 1 ? 'service is' : 'services are'} reporting an outage`
-  }
-  if (statusData.value.summary.degraded > 0) return 'Some services are responding slowly'
-  if (statusData.value.partial) return 'Some monitoring data is unavailable'
-  return 'All monitored services are operational'
-})
-
-const updatedLabel = computed(() => formatCheckedAt(statusData.value?.updatedAt || null))
 
 async function loadStatus(manual = false) {
   requestController?.abort()
@@ -336,39 +278,7 @@ onUnmounted(() => {
           </button>
         </div>
 
-        <div
-          v-if="!errorMessage"
-          class="overall-banner"
-          :class="`is-${overallState}`"
-          role="status"
-          aria-live="polite"
-        >
-          <div class="overall-banner__message">
-            <span class="status-orb" aria-hidden="true"><span></span></span>
-            <div>
-              <strong>{{ overallLabel }}</strong>
-              <span v-if="statusData">Updated {{ updatedLabel }}</span>
-              <span v-else>Running live checks now</span>
-            </div>
-          </div>
-
-          <div v-if="statusData" class="overview-stats" aria-label="Status summary">
-            <div>
-              <strong>{{ statusData.summary.operational }}</strong>
-              <span>Operational</span>
-            </div>
-            <div>
-              <strong>{{ issueCount }}</strong>
-              <span>With issues</span>
-            </div>
-            <div>
-              <strong>{{ averageLatency === null ? '—' : formatLatency(averageLatency) }}</strong>
-              <span>Avg. response</span>
-            </div>
-          </div>
-        </div>
-
-        <div v-else class="status-error" role="alert">
+        <div v-if="errorMessage" class="status-error" role="alert">
           <div>
             <strong>Status data is unavailable</strong>
             <span>{{ errorMessage }}</span>
@@ -700,99 +610,6 @@ onUnmounted(() => {
   font-weight: 750;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-}
-
-.overall-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  margin-top: 38px;
-  padding: 22px 24px;
-  border: 1px solid color-mix(in srgb, var(--banner-color) 26%, var(--vp-c-divider));
-  border-radius: 15px;
-  background: color-mix(in srgb, var(--banner-color) 7%, var(--vp-c-bg-elv));
-  --banner-color: var(--status-muted);
-}
-
-.overall-banner.is-operational { --banner-color: var(--status-green); }
-.overall-banner.is-degraded { --banner-color: var(--status-amber); }
-.overall-banner.is-outage { --banner-color: var(--status-red); }
-
-.overall-banner__message {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  min-width: 0;
-}
-
-.overall-banner__message > div {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-
-.overall-banner__message strong {
-  overflow: hidden;
-  font-size: 15px;
-  font-weight: 680;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.overall-banner__message span:not(.status-orb) {
-  color: var(--vp-c-text-3);
-  font-size: 12px;
-}
-
-.status-orb {
-  position: relative;
-  display: grid;
-  flex: 0 0 auto;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--banner-color) 15%, transparent);
-}
-
-.status-orb::before,
-.status-orb span {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--banner-color);
-}
-
-.status-orb::before { content: ''; }
-.status-orb span {
-  position: absolute;
-  animation: status-pulse 2.2s ease-out infinite;
-}
-
-.overview-stats {
-  display: flex;
-  align-items: stretch;
-  flex: 0 0 auto;
-}
-
-.overview-stats > div {
-  display: flex;
-  min-width: 98px;
-  padding: 0 20px;
-  flex-direction: column;
-  border-left: 1px solid var(--vp-c-divider);
-}
-
-.overview-stats strong {
-  font-size: 15px;
-  font-weight: 700;
-}
-
-.overview-stats span {
-  color: var(--vp-c-text-3);
-  font-size: 11px;
 }
 
 .status-error {
@@ -1250,32 +1067,9 @@ onUnmounted(() => {
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }
-@keyframes status-pulse {
-  0% { opacity: 0.45; transform: scale(1); }
-  70%, 100% { opacity: 0; transform: scale(2.7); }
-}
 @keyframes shimmer { to { background-position: -200% 0; } }
 
 @media (max-width: 860px) {
-  .overall-banner {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .overview-stats {
-    width: 100%;
-    padding-top: 16px;
-    border-top: 1px solid var(--vp-c-divider);
-  }
-
-  .overview-stats > div {
-    min-width: 0;
-    padding: 0 18px;
-    flex: 1;
-  }
-
-  .overview-stats > div:first-child { padding-left: 0; border-left: 0; }
-
   .service-row {
     grid-template-columns: minmax(190px, 1fr) auto 102px;
     gap: 18px;
@@ -1300,13 +1094,6 @@ onUnmounted(() => {
   .refresh-button { width: 100%; }
   .provider-picker { flex-wrap: wrap; }
   .provider-picker > span { width: 100%; }
-
-  .overall-banner { margin-top: 28px; padding: 18px; }
-  .overall-banner__message strong { white-space: normal; }
-
-  .overview-stats > div { padding: 0 10px; }
-  .overview-stats strong { font-size: 13px; }
-  .overview-stats span { font-size: 9px; }
 
   .community-heading {
     align-items: flex-start;
@@ -1341,7 +1128,6 @@ onUnmounted(() => {
 }
 
 @media (max-width: 420px) {
-  .overview-stats > div:nth-child(3) { display: none; }
   .service-state { min-width: 31px; width: 31px; padding: 0; font-size: 0; }
   .service-state > span { width: 8px; height: 8px; }
   .service-identity > div > span { max-width: 180px; }
@@ -1349,7 +1135,6 @@ onUnmounted(() => {
 
 @media (prefers-reduced-motion: reduce) {
   .refresh-button svg.spinning,
-  .status-orb span,
   .loading-feature,
   .loading-controls,
   .loading-group { animation: none; }
