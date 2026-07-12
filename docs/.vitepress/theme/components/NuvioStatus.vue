@@ -72,8 +72,8 @@ const selectedProvider = ref<StatusProvider>('ibbylabs')
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 let requestController: AbortController | undefined
 
-const platformService = computed(() =>
-  statusData.value?.services.find((service) => service.kind === 'platform') || null
+const platformServices = computed(() =>
+  statusData.value?.services.filter((service) => service.kind === 'platform') || []
 )
 
 const communityServices = computed(() =>
@@ -132,6 +132,14 @@ const issueCount = computed(() => {
   return summary ? summary.degraded + summary.outages + summary.unknown : 0
 })
 
+const unavailablePlatformServices = computed(() =>
+  platformServices.value.filter((service) => service.status === 'outage')
+)
+
+const communityOutageCount = computed(() =>
+  communityServices.value.filter((service) => service.status === 'outage').length
+)
+
 const averageLatency = computed(() => {
   const latencies = statusData.value?.services
     .map((service) => service.latencyMs)
@@ -142,7 +150,7 @@ const averageLatency = computed(() => {
 
 const overallState = computed<ServiceState>(() => {
   if (!statusData.value) return 'unknown'
-  if (platformService.value?.status === 'outage') return 'outage'
+  if (unavailablePlatformServices.value.length > 0) return 'outage'
   if (statusData.value.summary.outages > 0) return 'outage'
   if (statusData.value.summary.degraded > 0) return 'degraded'
   if (statusData.value.summary.unknown > 0 || statusData.value.partial) return 'unknown'
@@ -151,9 +159,17 @@ const overallState = computed<ServiceState>(() => {
 
 const overallLabel = computed(() => {
   if (!statusData.value) return 'Checking service health'
-  if (platformService.value?.status === 'outage') return 'Nuvio is currently unavailable'
-  if (statusData.value.summary.outages > 0) {
-    const count = statusData.value.summary.outages
+  if (unavailablePlatformServices.value.length > 0) {
+    const names = unavailablePlatformServices.value.map((service) => service.name)
+    const nuvioMessage = names.length === 1
+      ? `${names[0]} is currently unavailable`
+      : `${names.length} Nuvio services are currently unavailable: ${names.join(', ')}`
+    if (communityOutageCount.value === 0) return nuvioMessage
+    const communityMessage = `${communityOutageCount.value} community ${communityOutageCount.value === 1 ? 'service is' : 'services are'} also reporting an outage`
+    return `${nuvioMessage} · ${communityMessage}`
+  }
+  if (communityOutageCount.value > 0) {
+    const count = communityOutageCount.value
     return `${count} community ${count === 1 ? 'service is' : 'services are'} reporting an outage`
   }
   if (statusData.value.summary.degraded > 0) return 'Some services are responding slowly'
@@ -366,17 +382,22 @@ onUnmounted(() => {
       </div>
 
       <template v-else-if="statusData">
-        <section v-if="platformService" class="platform-section" aria-labelledby="platform-heading">
-          <div class="section-kicker">First-party platform</div>
-          <article class="platform-card" :class="`is-${platformService.status}`">
+        <section v-if="platformServices.length" class="platform-section" aria-labelledby="platform-heading">
+          <div class="section-kicker">First-party Nuvio services</div>
+          <article
+            v-for="(service, index) in platformServices"
+            :key="service.id"
+            class="platform-card"
+            :class="`is-${service.status}`"
+          >
             <div class="platform-card__brand">
               <div class="platform-logo" aria-hidden="true">
                 <img :src="withBase('/logo.png')" alt="" />
               </div>
               <div>
-                <h2 id="platform-heading">Nuvio</h2>
-                <a :href="platformService.url || 'https://nuvio.tv/'" target="_blank" rel="noopener noreferrer">
-                  nuvio.tv
+                <h2 :id="index === 0 ? 'platform-heading' : undefined">{{ service.name }}</h2>
+                <a :href="service.url || 'https://nuvio.tv/'" target="_blank" rel="noopener noreferrer">
+                  {{ service.hostname || 'nuvio.tv' }}
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M14 5h5v5M19 5l-9 9M19 14v5H5V5h5" />
                   </svg>
@@ -385,10 +406,10 @@ onUnmounted(() => {
             </div>
 
             <div class="platform-card__telemetry">
-              <div class="history-strip" aria-label="Recent Nuvio checks">
+              <div class="history-strip" :aria-label="`Recent ${service.name} checks`">
                 <span
-                  v-for="(check, index) in historySlots(platformService)"
-                  :key="index"
+                  v-for="(check, checkIndex) in historySlots(service)"
+                  :key="checkIndex"
                   class="history-bar"
                   :class="check ? `is-${check.status}` : 'is-empty'"
                   :title="check ? `${statusLabel(check.status)} · ${formatLatency(check.latencyMs)} · ${formatCheckedAt(check.checkedAt)}` : 'No check recorded'"
@@ -396,11 +417,11 @@ onUnmounted(() => {
               </div>
               <div class="platform-card__latency">
                 <span>Response time</span>
-                <strong>{{ formatLatency(platformService.latencyMs) }}</strong>
+                <strong>{{ formatLatency(service.latencyMs) }}</strong>
               </div>
-              <span class="state-pill" :class="`is-${platformService.status}`">
+              <span class="state-pill" :class="`is-${service.status}`">
                 <span aria-hidden="true"></span>
-                {{ statusLabel(platformService.status) }}
+                {{ statusLabel(service.status) }}
               </span>
             </div>
           </article>
@@ -852,6 +873,8 @@ onUnmounted(() => {
   background: var(--vp-c-bg-elv);
   box-shadow: 0 14px 40px rgba(17, 24, 39, 0.05);
 }
+
+.platform-card + .platform-card { margin-top: 12px; }
 
 .dark .platform-card { box-shadow: 0 14px 40px rgba(0, 0, 0, 0.2); }
 

@@ -117,14 +117,16 @@ export function normalizeIbbyLabsStatus(payload) {
       const checkedAt = last?.checkedAt || payload.generatedAt || null;
       const latency = Number(last?.latency);
       const latencyMs = Number.isFinite(latency) ? Math.max(0, Math.round(latency)) : null;
+      const isNuvioService = group.trim().toLocaleLowerCase() === 'nuvio'
+        || String(service?.id || '').startsWith('nuvio-');
       const isNuvioWebsite = service?.id === 'nuvio-website';
 
       return {
         id: String(service?.id || `${group}-${service?.name || 'service'}`),
         name: isNuvioWebsite ? 'Nuvio' : String(service?.name || 'Unnamed service'),
-        group: isNuvioWebsite ? 'Nuvio Platform' : group,
-        groupOrder: isNuvioWebsite ? 0 : groupOrders.get(group),
-        kind: isNuvioWebsite ? 'platform' : 'community',
+        group: isNuvioService ? 'Nuvio Platform' : group,
+        groupOrder: isNuvioService ? 0 : groupOrders.get(group),
+        kind: isNuvioService ? 'platform' : 'community',
         url: service?.url || null,
         hostname: hostnameFromUrl(service?.url),
         status,

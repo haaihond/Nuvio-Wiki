@@ -19,6 +19,10 @@ const ibbyLabsPayload = {
       last: { state: 'DEGRADED', up: true, latency: 850, checkedAt: '2026-07-10T12:00:00.000Z' }
     },
     {
+      id: 'nuvio-api', name: 'Nuvio API', group: 'Nuvio', url: 'https://nuvio.tv/',
+      last: { state: 'DOWN', up: false, latency: 900, checkedAt: '2026-07-10T12:00:00.000Z' }
+    },
+    {
       id: 'hidden-service', name: 'Hidden', group: 'Internal', hideFromStatusPage: true,
       last: { state: 'DOWN', up: false }
     }
@@ -77,15 +81,18 @@ test('normalizes community checks and removes Stremio platform services', () => 
   );
 });
 
-test('normalizes Ibby Labs services and promotes the Nuvio website', () => {
+test('normalizes Ibby Labs services and promotes every Nuvio service', () => {
   const services = normalizeIbbyLabsStatus(ibbyLabsPayload);
 
-  assert.equal(services.length, 2);
+  assert.equal(services.length, 3);
   assert.equal(services[0].kind, 'platform');
   assert.equal(services[0].name, 'Nuvio');
   assert.equal(services[0].latencyMs, 125);
-  assert.equal(services[1].status, 'degraded');
-  assert.equal(services[1].hostname, 'addon.example');
+  assert.equal(services[1].kind, 'platform');
+  assert.equal(services[1].name, 'Nuvio API');
+  assert.equal(services[1].status, 'outage');
+  assert.equal(services[2].status, 'degraded');
+  assert.equal(services[2].hostname, 'addon.example');
 });
 
 test('uses Ibby Labs by default and caches its overview', async () => {
@@ -106,7 +113,7 @@ test('uses Ibby Labs by default and caches its overview', async () => {
   assert.equal(first.provider, 'ibbylabs');
   assert.equal(first.source.url, 'https://uptime.ibbylabs.dev');
   assert.deepEqual(first.summary, {
-    total: 2, operational: 1, degraded: 1, outages: 0, unknown: 0
+    total: 3, operational: 1, degraded: 1, outages: 1, unknown: 0
   });
 });
 

@@ -57,6 +57,34 @@ body {
   max-width: 820px;
 }
 
+/* Tool workspaces need room for multi-pane editors without widening articles. */
+.tools-page .VPDoc .content-container {
+  max-width: 1240px;
+}
+
+.VPDoc:has(.vp-doc._tools) > .container {
+  max-width: 1240px;
+}
+
+.VPDoc:has(.vp-doc._tools) .aside {
+  display: none !important;
+}
+
+.VPDoc:has(.vp-doc._tools) .content {
+  width: 100%;
+  min-width: 0;
+}
+
+.VPDoc:has(.vp-doc._tools) .content-container {
+  width: 100%;
+  max-width: 1240px !important;
+}
+
+.tools-page .vp-doc._tools > h1,
+.tools-page .vp-doc._tools > p {
+  max-width: 780px;
+}
+
 .vp-doc {
   color: var(--vp-c-text-1);
   font-size: 16px;

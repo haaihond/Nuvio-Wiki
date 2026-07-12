@@ -1,11 +1,24 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, markRaw, ref, onMounted, onUnmounted } from 'vue'
 
-type ToolId = 'quickstart' | 'p2p' | 'trakt' | 'profile-transfer'
+type ToolId = 'quickstart' | 'badge-editor' | 'p2p' | 'trakt' | 'profile-transfer'
+
+type ToolTab = {
+  id: ToolId
+  label: string
+  description: string
+  title: string
+  details: string
+  component: ReturnType<typeof defineAsyncComponent>
+  props: Record<string, boolean>
+  icon: string
+  workspace?: boolean
+  showHeader?: boolean
+}
 
 const activeTab = ref<ToolId>('quickstart')
 
-const tabs = [
+const tabs: ToolTab[] = [
   {
     id: 'quickstart',
     label: 'Quickstart Tool',
@@ -15,6 +28,18 @@ const tabs = [
     component: markRaw(defineAsyncComponent(() => import('./NuvioQuickstart.vue'))),
     props: { defaultExpanded: true, hideTip: true, hideHeader: true },
     icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="tab-icon-svg"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>`
+  },
+  {
+    id: 'badge-editor',
+    label: 'Badge Editor',
+    description: 'Build, test, import, and export stream badges.',
+    title: 'Nuvio Badge Editor',
+    details: 'Create and validate a complete badge set with live stream-title matching.',
+    component: markRaw(defineAsyncComponent(() => import('./NuvioBadgeEditor.vue'))),
+    props: {},
+    workspace: true,
+    showHeader: false,
+    icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="tab-icon-svg"><path d="M4 5h10l6 7-6 7H4V5Z"/><circle cx="8" cy="12" r="1.5"/></svg>`
   },
   {
     id: 'p2p',
@@ -46,7 +71,7 @@ const tabs = [
     props: {},
     icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="tab-icon-svg"><path d="M7 7h11l-3-3m3 3-3 3M17 17H6l3 3m-3-3 3-3"/></svg>`
   }
-] satisfies Array<{ id: ToolId; label: string; description: string; title: string; details: string; component: ReturnType<typeof defineAsyncComponent>; props: Record<string, boolean>; icon: string }>
+]
 
 const activeTool = computed(() => tabs.find(tab => tab.id === activeTab.value) ?? tabs[0])
 
@@ -85,9 +110,11 @@ const selectTab = (id: ToolId) => {
         v-for="tab in tabs"
         :key="tab.id"
         :class="['tools-tab-btn', { active: activeTab === tab.id }]"
+        type="button"
+        :aria-pressed="activeTab === tab.id"
         @click="selectTab(tab.id)"
       >
-        <span class="tab-icon-wrap" v-html="tab.icon"></span>
+        <span class="tab-icon-wrap" aria-hidden="true" v-html="tab.icon"></span>
         <div class="tab-text-wrap">
           <span class="tab-label">{{ tab.label }}</span>
           <span class="tab-description">{{ tab.description }}</span>
@@ -95,9 +122,9 @@ const selectTab = (id: ToolId) => {
       </button>
     </div>
 
-    <div class="tools-content">
+    <div :class="['tools-content', { 'tools-content--workspace': activeTool.workspace }]">
       <div class="tool-wrapper">
-        <div class="tool-info-header">
+        <div v-if="activeTool.showHeader !== false" class="tool-info-header">
           <h2>{{ activeTool.title }}</h2>
           <p v-html="activeTool.details"></p>
         </div>
@@ -119,11 +146,12 @@ const selectTab = (id: ToolId) => {
   flex-direction: column;
   gap: 24px;
   margin: 24px 0;
+  container-type: inline-size;
 }
 
 .tools-tabs {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
   background: var(--vp-c-bg-soft);
   padding: 8px;
@@ -142,6 +170,7 @@ const selectTab = (id: ToolId) => {
   text-align: left;
   cursor: pointer;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  min-width: 0;
 }
 
 .tools-tab-btn:hover {
@@ -182,16 +211,23 @@ const selectTab = (id: ToolId) => {
   height: 20px;
 }
 
+.tools-tab-btn:focus-visible {
+  outline: 2px solid var(--vp-c-brand-1);
+  outline-offset: 2px;
+}
+
 .tab-text-wrap {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 
 .tab-label {
   font-weight: 600;
   font-size: 14px;
   color: var(--vp-c-text-1);
+  line-height: 1.25;
 }
 
 .tab-description {
@@ -206,6 +242,12 @@ const selectTab = (id: ToolId) => {
   border-radius: 12px;
   padding: 24px;
   min-height: 400px;
+}
+
+.tools-content--workspace {
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 
 .tool-info-header {
@@ -228,9 +270,33 @@ const selectTab = (id: ToolId) => {
   line-height: 1.5;
 }
 
-@media (max-width: 768px) {
+@container (max-width: 950px) {
+  .tools-tab-btn {
+    align-items: center;
+    gap: 9px;
+    padding: 12px 10px;
+  }
+
+  .tab-icon-wrap {
+    padding: 8px;
+  }
+
+  .tab-description {
+    display: none;
+  }
+}
+
+@container (max-width: 680px) {
   .tools-tabs {
-    grid-template-columns: 1fr;
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+  }
+
+  .tools-tab-btn {
+    flex: 0 0 164px;
+    scroll-snap-align: start;
   }
 }
 </style>
