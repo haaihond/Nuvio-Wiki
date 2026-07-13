@@ -49,6 +49,8 @@ const tabs: ToolTab[] = [
     details: 'Generate keyless P2P configurations for AIOStreams. It resolves the full <strong>Tam-Taro Complete SEL (TAMS)</strong> template for P2P mode with no debrid keys required.',
     component: markRaw(defineAsyncComponent(() => import('./P2PGenerator.vue'))),
     props: {},
+    workspace: true,
+    showHeader: false,
     icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="tab-icon-svg"><path d="M18 8A3 3 0 1 0 15 5a3 3 0 0 0 3 3ZM6 15a3 3 0 1 0-3-3 3 3 0 0 0 3 3Zm12 6a3 3 0 1 0-3-3 3 3 0 0 0 3 3Zm-3.5-3.5-8-4M8.5 11l8-4"/></svg>`
   },
   {
@@ -157,7 +159,7 @@ const selectTab = (id: ToolId) => {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
-  background: var(--vp-c-bg-soft);
+  background: var(--tool-surface);
   padding: 10px;
   border-radius: 14px;
   border: 1px solid var(--vp-c-divider);
@@ -172,19 +174,19 @@ const selectTab = (id: ToolId) => {
   padding: 14px;
   border-radius: 11px;
   border: 1px solid var(--vp-c-divider);
-  background: var(--vp-c-bg-alt);
+  background: var(--tool-surface-alt);
   text-align: left;
   cursor: pointer;
   transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .tools-tab-btn:hover {
-  background: var(--vp-c-bg-elv);
+  background: var(--tool-surface-alt);
   border-color: var(--vp-c-text-3);
 }
 
 .tools-tab-btn.active {
-  background: var(--vp-c-bg-elv);
+  background: var(--tool-surface);
   border-color: var(--vp-c-brand-1);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
 }
@@ -200,7 +202,7 @@ const selectTab = (id: ToolId) => {
   flex: 0 0 42px;
   width: 42px;
   height: 42px;
-  background: var(--vp-c-bg-soft);
+  background: var(--tool-surface);
   border-radius: 10px;
   color: var(--vp-c-text-2);
   transition: background-color 0.2s ease, color 0.2s ease;
