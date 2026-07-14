@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { withBase } from 'vitepress'
 import {
   areas,
@@ -62,6 +62,45 @@ const answers = ref<Record<string, AnswerValue>>({})
 const stageHeading = ref<HTMLElement>()
 const feedbackChoice = ref<boolean | null>(null)
 const feedbackState = ref<'idle' | 'sending' | 'sent' | 'error'>('idle')
+
+const isCheckingStatus = ref(false)
+const nuvioServicesUp = ref<boolean | null>(null)
+
+async function checkNuvioStatus() {
+  if (isCheckingStatus.value) return
+  isCheckingStatus.value = true
+  try {
+    const response = await fetch(withBase('/api/status?provider=ibbylabs'))
+    if (!response.ok) throw new Error('Status request failed')
+    const data = await response.json()
+    if (data && Array.isArray(data.services)) {
+      const nuvioServices = data.services.filter((s: any) =>
+        s.group === 'Nuvio' || s.id.startsWith('nuvio-')
+      )
+      if (nuvioServices.length > 0) {
+        const hasIssue = nuvioServices.some((s: any) => s.status === 'outage' || s.status === 'degraded')
+        nuvioServicesUp.value = !hasIssue
+      } else {
+        nuvioServicesUp.value = !(data.summary?.outages > 0)
+      }
+    } else {
+      nuvioServicesUp.value = true
+    }
+  } catch (error) {
+    console.error('Failed to check Nuvio service status:', error)
+    nuvioServicesUp.value = true
+  } finally {
+    isCheckingStatus.value = false
+  }
+}
+
+watch([selectedArea, selectedSymptom], ([area, symptom]) => {
+  if (area === 'install' && symptom === 'login') {
+    checkNuvioStatus()
+  } else {
+    nuvioServicesUp.value = null
+  }
+})
 
 const discordDmHref = 'https://discord.com/channels/@me'
 const kofiHref = 'https://ko-fi.com/haaihond'
@@ -288,6 +327,7 @@ function resetDoctor() {
   feedbackChoice.value = null
   feedbackState.value = 'idle'
   maxStepReached.value = 1
+  nuvioServicesUp.value = null
   setStep(1)
 }
 </script>
@@ -546,8 +586,31 @@ function resetDoctor() {
             <div class="doctor-result-mark" aria-hidden="true">
               <svg viewBox="0 0 24 24"><path d="m5 12.5 4.3 4.3L19 7" /></svg>
             </div>
-            <h2 ref="stageHeading" tabindex="-1">Start with the first fix</h2>
+            <h2 ref="stageHeading" tabindex="-1">
+              <template v-if="selectedArea === 'install' && selectedSymptom === 'login' && nuvioServicesUp === true">
+                Nuvio seems to be up, so try these things:
+              </template>
+              <template v-else-if="selectedArea === 'install' && selectedSymptom === 'login' && nuvioServicesUp === false">
+                Nuvio is currently down
+              </template>
+              <template v-else>
+                Start with the first fix
+              </template>
+            </h2>
             <p>{{ resultContext }}</p>
+          </div>
+
+          <div v-if="selectedArea === 'install' && selectedSymptom === 'login' && nuvioServicesUp === false" class="status-warning-banner">
+            <svg viewBox="0 0 24 24" class="warning-icon" aria-hidden="true">
+              <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <div class="warning-content">
+              <strong>Nuvio services appear to be down</strong>
+              <p>
+                Our monitor detected that Nuvio is currently experiencing an outage.
+                Please check the <a :href="withBase('/status')">Service Status</a> page for live details.
+              </p>
+            </div>
           </div>
 
           <div class="result-list">
@@ -1503,5 +1566,55 @@ function resetDoctor() {
     scroll-behavior: auto !important;
     transition: none !important;
   }
+}
+
+.status-warning-banner {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 30px;
+  padding: 16px 20px;
+  border: 1px solid color-mix(in srgb, #ea580c 35%, var(--vp-c-divider));
+  border-radius: 14px;
+  background: color-mix(in srgb, #ea580c 8%, var(--vp-c-bg-soft));
+  align-items: flex-start;
+}
+
+.status-warning-banner .warning-icon {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: #ea580c;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.status-warning-banner .warning-content strong {
+  display: block;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--vp-c-text-1);
+  margin-bottom: 4px;
+}
+
+.status-warning-banner .warning-content p {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--vp-c-text-2);
+}
+
+.status-warning-banner .warning-content a {
+  color: var(--vp-c-brand-1);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.status-warning-banner .warning-content a:hover {
+  color: var(--vp-c-brand-2);
+  text-decoration: none;
 }
 </style>

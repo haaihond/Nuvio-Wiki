@@ -22,7 +22,15 @@ repository in a directory owned by that account:
 ```env
 FILE_SEARCH_DATA_FILE=/var/lib/nuvio-ai/file-search.json
 CACHE_DATA_FILE=/var/lib/nuvio-ai/cache.json
+METADATA_CACHE_DB_FILE=/var/lib/nuvio-ai/metadata-cache.sqlite
 ```
+
+Metadata enrichment is sent by the browser in concurrent 400-item batches. The
+server accepts at most 1,000 items per request, applies high abuse-only limits
+(300 requests/minute and 3,000/hour per IP), and schedules upstream calls below
+TMDB's bulk-request ceiling. Results are stored in a WAL-mode SQLite cache capped
+at 500,000 keys with expiry and short-lived negative caching. All of these
+operational limits can be tuned with the variables documented in `.env.example`.
 
 ## Roll back to explicit context caching
 

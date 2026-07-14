@@ -225,31 +225,47 @@ const normalizedEpisodeTitleCache = new Map()
 
 // --- Lifecycle & Auth listeners ---
 let traktBroadcastChannel: BroadcastChannel | null = null
+let traktPopup: Window | null = null
+let expectedTraktState: string | null = null
 
 onMounted(() => {
-  window.addEventListener('message', handleTraktMessage)
+  window.addEventListener('message', handleTraktWindowMessage)
   if ('BroadcastChannel' in window) {
     traktBroadcastChannel = new BroadcastChannel('nuvio-trakt-bridge.trakt-oauth')
-    traktBroadcastChannel.addEventListener('message', handleTraktMessage)
+    traktBroadcastChannel.addEventListener('message', handleTraktBroadcastMessage)
   }
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('message', handleTraktMessage)
+  window.removeEventListener('message', handleTraktWindowMessage)
   if (traktBroadcastChannel) {
     traktBroadcastChannel.close()
   }
+  traktPopup = null
+  expectedTraktState = null
 })
 
-function handleTraktMessage(event: MessageEvent) {
-  const payload = event.data
-  if (payload && payload.source === 'trakt-oauth' && payload.status === 'success') {
-    state.trakt.token = normalizeTraktToken(payload.tokens)
-    state.trakt.clientId = payload.client_id
-    uiState.isTraktConnecting = false
-    logLine('Trakt connected successfully.')
-    showToast(t.value.successToast)
-  }
+function handleTraktWindowMessage(event: MessageEvent) {
+  if (event.origin !== window.location.origin || event.source !== traktPopup) return
+  handleTraktPayload(event.data)
+}
+
+function handleTraktBroadcastMessage(event: MessageEvent) {
+  if (event.origin && event.origin !== window.location.origin) return
+  handleTraktPayload(event.data)
+}
+
+function handleTraktPayload(payload: any) {
+  if (!payload || payload.source !== 'trakt-oauth' || payload.status !== 'success') return
+  if (!expectedTraktState || payload.state !== expectedTraktState) return
+
+  expectedTraktState = null
+  traktPopup = null
+  state.trakt.token = normalizeTraktToken(payload.tokens)
+  state.trakt.clientId = payload.client_id
+  uiState.isTraktConnecting = false
+  logLine('Trakt connected successfully.')
+  showToast(t.value.successToast)
 }
 
 // --- Helper Utilities ---
@@ -312,6 +328,39 @@ async function requestJson(url: string, options: RequestInit = {}) {
   return { data, headers: response.headers }
 }
 
+const METADATA_ENRICHMENT_BATCH_SIZE = 400
+const METADATA_ENRICHMENT_CONCURRENCY = 4
+
+function wait(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function enrichMetadataChunk(items: any[], attempt = 0): Promise<any[]> {
+  try {
+    const response = await requestJson(window.location.origin + withBase('/api/trakt/enrich-metadata'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ items })
+    })
+    const results = Array.isArray(response.data?.results) ? response.data.results : []
+    const retryItems = items.filter((_, index) => results[index]?.retryable)
+
+    if (retryItems.length && attempt < 1) {
+      await wait(500)
+      return [...results, ...await enrichMetadataChunk(retryItems, attempt + 1)]
+    }
+    return results
+  } catch (error: any) {
+    if (attempt < 1 && (error?.status === 429 || error?.status >= 500)) {
+      await wait(1_000)
+      return enrichMetadataChunk(items, attempt + 1)
+    }
+    throw error
+  }
+}
+
 // --- Trakt OAuth flow ---
 async function connectTrakt() {
   uiState.isTraktConnecting = true
@@ -325,17 +374,22 @@ async function connectTrakt() {
       body: JSON.stringify({ return_origin: window.location.origin })
     })
 
-    if (!data?.url) {
-      throw new Error('Endpoint did not return authorization URL.')
+    if (!data?.url || typeof data.state !== 'string') {
+      throw new Error('Endpoint did not return a valid authorization transaction.')
     }
 
+    expectedTraktState = data.state
     logLine(t.value.waitingTrakt)
     const popup = window.open(data.url, 'trakt-sign-in', 'width=600,height=780')
     if (!popup) {
+      expectedTraktState = null
       throw new Error('Please allow popups to authorize Trakt.')
     }
+    traktPopup = popup
     popup.focus()
   } catch (error: any) {
+    traktPopup = null
+    expectedTraktState = null
     uiState.isTraktConnecting = false
     uiState.globalError = error.message
     logLine(`Trakt Connection Error: ${error.message}`)
@@ -1337,15 +1391,32 @@ async function executeSync() {
       if (plan.library.length) {
         logLine(`Enriching ${plan.library.length} imported library items with metadata...`)
         try {
-          const enrichRes = await requestJson(window.location.origin + withBase('/api/trakt/enrich-metadata'), {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ items: plan.library })
-          })
+          const metadataItems = plan.library.map((item: any) => ({
+            content_id: item.content_id,
+            content_type: item.content_type,
+            name: String(item.name || 'Untitled').slice(0, 256),
+            _ids: {
+              tmdb: item._ids?.tmdb,
+              imdb: item._ids?.imdb
+            }
+          }))
+          const metadataChunks = chunkArray(metadataItems, METADATA_ENRICHMENT_BATCH_SIZE)
+          const enrichedResults = [] as any[]
 
-          const enrichedResults = enrichRes?.data?.results || []
+          for (let offset = 0; offset < metadataChunks.length; offset += METADATA_ENRICHMENT_CONCURRENCY) {
+            const wave = metadataChunks.slice(offset, offset + METADATA_ENRICHMENT_CONCURRENCY)
+            const settled = await Promise.allSettled(wave.map(chunk => enrichMetadataChunk(chunk)))
+            settled.forEach(result => {
+              if (result.status === 'fulfilled') {
+                enrichedResults.push(...result.value)
+              } else {
+                logLine(`Warning: A metadata batch failed (${result.reason?.message || result.reason}).`)
+              }
+            })
+            const completed = Math.min(offset + wave.length, metadataChunks.length)
+            logLine(`Metadata batches complete: ${completed}/${metadataChunks.length}`)
+          }
+
           const enrichMap = new Map()
           enrichedResults.forEach((r: any) => enrichMap.set(r.content_id, r))
 

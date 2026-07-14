@@ -9,6 +9,10 @@ server/.env
 server/cache.json
 server/file-search.json
 server/file-search.json.tmp
+server/metadata-cache.json
+server/metadata-cache.sqlite
+server/metadata-cache.sqlite-shm
+server/metadata-cache.sqlite-wal
 server/node_modules/
 
 # Scratch files

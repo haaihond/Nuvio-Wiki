@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { GoogleGenAI } from '@google/genai';
-import { readFileSync, existsSync, writeFileSync, readdirSync, statSync } from 'fs';
+import { readFileSync, existsSync, readdirSync, statSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join, resolve } from 'path';
 import { buildAndSaveCache } from './refresh-cache.js';
@@ -14,6 +14,16 @@ import {
 } from './refresh-file-search.js';
 import { runSetup, SetupError } from './quickstart/services.js';
 import { getStatusOverview } from './status.js';
+import { createTraktOAuthStateStore } from './trakt-oauth.js';
+import {
+  createMetadataCache,
+  DEFAULT_METADATA_CACHE_MAX_ENTRIES
+} from './metadata-cache.js';
+import {
+  createMetadataEnricher,
+  createRequestScheduler,
+  MAX_METADATA_BATCH_ITEMS
+} from './metadata-enrichment.js';
 import {
   ADMIN_COOKIE_NAME,
   createAdminSecurity,
@@ -36,6 +46,35 @@ const KNOWLEDGE_MODE = (process.env.KNOWLEDGE_MODE || 'file-search').trim().toLo
 const CACHE_FILE = process.env.CACHE_DATA_FILE
   ? resolve(process.env.CACHE_DATA_FILE)
   : join(__dirname, 'cache.json');
+const METADATA_CACHE_DB_FILE = process.env.METADATA_CACHE_DB_FILE
+  ? resolve(process.env.METADATA_CACHE_DB_FILE)
+  : join(__dirname, 'metadata-cache.sqlite');
+const LEGACY_METADATA_CACHE_FILE = join(__dirname, 'metadata-cache.json');
+const METADATA_CACHE_MAX_ENTRIES = positiveInteger(
+  process.env.METADATA_CACHE_MAX_ENTRIES,
+  DEFAULT_METADATA_CACHE_MAX_ENTRIES
+);
+const METADATA_RATE_LIMIT_PER_MINUTE = positiveInteger(
+  process.env.METADATA_RATE_LIMIT_PER_MINUTE,
+  300
+);
+const METADATA_RATE_LIMIT_PER_HOUR = positiveInteger(
+  process.env.METADATA_RATE_LIMIT_PER_HOUR,
+  3_000
+);
+const METADATA_UPSTREAM_TIMEOUT_MS = positiveInteger(
+  process.env.METADATA_UPSTREAM_TIMEOUT_MS,
+  8_000
+);
+const METADATA_BATCH_TIMEOUT_MS = positiveInteger(
+  process.env.METADATA_BATCH_TIMEOUT_MS,
+  110_000
+);
+
+function positiveInteger(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
 
 if (!['file-search', 'cache'].includes(KNOWLEDGE_MODE)) {
   console.error('❌  KNOWLEDGE_MODE must be either "file-search" or "cache".');
@@ -52,6 +91,7 @@ const adminSecurity = createAdminSecurity();
 const requestMetrics = createRequestMetrics();
 const setupDoctorFeedback = createSetupDoctorFeedbackStore();
 const serverLogs = createServerLogStore();
+const traktOAuthStates = createTraktOAuthStateStore({ allowedOrigins: ALLOWED_ORIGIN });
 
 for (const [method, level] of Object.entries({
   log: 'info',
@@ -65,6 +105,20 @@ for (const [method, level] of Object.entries({
     serverLogs.record(level, values);
     writeToConsole(...values);
   };
+}
+
+const metadataCache = createMetadataCache({
+  file: METADATA_CACHE_DB_FILE,
+  legacyFile: LEGACY_METADATA_CACHE_FILE,
+  maxEntries: METADATA_CACHE_MAX_ENTRIES
+});
+const metadataUpstreamScheduler = createRequestScheduler({
+  maxConcurrent: 12,
+  minTimeMs: 30
+});
+
+if (metadataCache.migratedEntries > 0) {
+  console.log(`Migrated ${metadataCache.migratedEntries} legacy metadata cache entries to SQLite.`);
 }
 
 // ── Cache state ──────────────────────────────────────────────────────────
@@ -298,11 +352,7 @@ function readEnglishContentStats() {
 
 function readMetadataCacheStats() {
   try {
-    if (!existsSync(METADATA_CACHE_FILE)) return { metadataEntries: 0, metadataCacheBytes: 0 };
-    return {
-      metadataEntries: Object.keys(readMetadataCache()).length,
-      metadataCacheBytes: statSync(METADATA_CACHE_FILE).size
-    };
+    return metadataCache.stats();
   } catch {
     return { metadataEntries: 0, metadataCacheBytes: 0 };
   }
@@ -449,8 +499,28 @@ function buildAdminOverview(session) {
 
 
 // ── Express app ─────────────────────────────────────────────────────────
+// These are deliberately high, abuse-oriented ceilings. A 20k-item library
+// uses roughly 50 client batches with the current browser chunk size.
+const metadataPerMinute = rateLimit({
+  windowMs: 60_000,
+  max: METADATA_RATE_LIMIT_PER_MINUTE,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Metadata enrichment request limit reached. Please retry shortly.' },
+  keyGenerator: (req) => req.ip
+});
+
+const metadataPerHour = rateLimit({
+  windowMs: 60 * 60_000,
+  max: METADATA_RATE_LIMIT_PER_HOUR,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Metadata enrichment hourly limit reached. Please retry later.' },
+  keyGenerator: (req) => req.ip
+});
+
 const app = express();
-app.set('trust proxy', true);
+app.set('trust proxy', 1);
 
 app.use(requestMetrics.middleware);
 
@@ -461,7 +531,27 @@ app.use(cors({
   credentials: true
 }));
 
+// This route intentionally accepts larger payloads, so its parser must run
+// before the global 64 KB parser consumes (or rejects) the request stream.
+app.use(
+  '/api/trakt/enrich-metadata',
+  metadataPerMinute,
+  metadataPerHour,
+  express.json({ limit: '2mb' })
+);
 app.use(express.json({ limit: '64kb' }));
+
+app.use((error, req, res, next) => {
+  if (error?.type === 'entity.too.large') {
+    const isMetadataRoute = req.path === '/api/trakt/enrich-metadata';
+    return res.status(413).json({
+      error: isMetadataRoute
+        ? `Metadata batches are limited to 2 MB and ${MAX_METADATA_BATCH_ITEMS} items.`
+        : 'JSON request body is too large.'
+    });
+  }
+  return next(error);
+});
 
 app.use('/api/admin', (_req, res, next) => {
   res.set({
@@ -654,15 +744,17 @@ app.post('/api/trakt/login-url', async (req, res) => {
       return res.status(500).json({ error: 'TRAKT_CLIENT_ID is not configured on the server.' });
     }
 
-    const stateValue = Math.random().toString(36).substring(2, 15);
-    const returnOrigin = req.body.return_origin || req.get('origin') || 'http://localhost:5173';
-    const stateParam = `${stateValue}:${Buffer.from(returnOrigin).toString('base64')}`;
+    const requestedReturnOrigin = req.body?.return_origin || req.get('origin') || ALLOWED_ORIGIN;
+    const oauthTransaction = traktOAuthStates.issue(requestedReturnOrigin);
+    if (!oauthTransaction) {
+      return res.status(400).json({ error: 'The requested OAuth return origin is not allowed.' });
+    }
     
     // We construct the redirect_uri dynamically based on the current host
     const redirectUri = getRedirectUri(req);
-    const url = `https://trakt.tv/oauth/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(stateParam)}`;
+    const url = `https://trakt.tv/oauth/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(oauthTransaction.state)}`;
 
-    res.json({ url, state: stateParam, client_id: clientId });
+    res.json({ url, state: oauthTransaction.state, client_id: clientId });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -682,17 +774,11 @@ app.get('/api/trakt/callback', async (req, res) => {
     }
 
     const stateStr = String(state);
-    const colonIdx = stateStr.indexOf(':');
-    if (colonIdx === -1) {
-      return res.status(400).send('Invalid state parameter.');
+    const oauthTransaction = traktOAuthStates.consume(stateStr);
+    if (!oauthTransaction) {
+      return res.status(400).send('Invalid or expired state parameter.');
     }
-    const returnOriginBase64 = stateStr.substring(colonIdx + 1);
-    let returnOrigin = 'http://localhost:5173';
-    try {
-      returnOrigin = Buffer.from(returnOriginBase64, 'base64').toString('utf8');
-    } catch (e) {
-      console.error('Failed to decode return_origin:', e);
-    }
+    const { returnOrigin } = oauthTransaction;
 
     const redirectUri = getRedirectUri(req);
     const response = await fetch('https://api.trakt.tv/oauth/token', {
@@ -736,7 +822,7 @@ app.get('/api/trakt/callback', async (req, res) => {
               window.opener.postMessage({
                 source: 'trakt-oauth',
                 status: 'success',
-                state: ${JSON.stringify(state)},
+                state: ${JSON.stringify(stateStr)},
                 client_id: ${JSON.stringify(clientId)},
                 tokens: ${JSON.stringify(tokens)}
               }, ${JSON.stringify(returnOrigin)});
@@ -902,27 +988,51 @@ app.get('/api/trakt/tmdb-config', (req, res) => {
   res.json({ hasKey: !!process.env.TMDB_API_KEY });
 });
 
-const METADATA_CACHE_FILE = join(__dirname, 'metadata-cache.json');
-
-function readMetadataCache() {
-  if (!existsSync(METADATA_CACHE_FILE)) return {};
-  try {
-    return JSON.parse(readFileSync(METADATA_CACHE_FILE, 'utf-8'));
-  } catch (e) {
-    console.error('Failed to read metadata cache:', e);
-    return {};
-  }
+function timeoutError(message) {
+  const error = new Error(message);
+  error.name = 'TimeoutError';
+  return error;
 }
 
-function writeMetadataCache(cache) {
-  try {
-    writeFileSync(METADATA_CACHE_FILE, JSON.stringify(cache, null, 2), 'utf-8');
-  } catch (e) {
-    console.error('Failed to write metadata cache:', e);
-  }
+function isTransientMetadataError(error) {
+  return error?.name === 'AbortError'
+    || error?.name === 'TimeoutError'
+    || error?.name === 'TypeError'
+    || error?.name === 'SyntaxError'
+    || error?.name === 'OverloadError'
+    || error?.status === 429
+    || error?.status >= 500;
 }
 
-async function fetchTmdb(path, queryParams = {}) {
+async function fetchScheduledJson(url, { headers, signal, service }) {
+  return metadataUpstreamScheduler.schedule(async () => {
+    const controller = new AbortController();
+    const onAbort = () => controller.abort(signal?.reason);
+    const timeout = setTimeout(() => {
+      controller.abort(timeoutError(`${service} did not respond within ${METADATA_UPSTREAM_TIMEOUT_MS}ms.`));
+    }, METADATA_UPSTREAM_TIMEOUT_MS);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+
+    try {
+      const response = await fetch(url, { headers, signal: controller.signal });
+      if (!response.ok) {
+        const error = new Error(`${service} API HTTP error ${response.status}`);
+        error.status = response.status;
+        throw error;
+      }
+      return await response.json();
+    } catch (error) {
+      if (controller.signal.reason?.name === 'TimeoutError') throw controller.signal.reason;
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+      signal?.removeEventListener('abort', onAbort);
+    }
+  }, { signal });
+}
+
+async function fetchTmdb(path, queryParams = {}, signal) {
   const apiKey = process.env.TMDB_API_KEY;
   if (!apiKey) {
     throw new Error('TMDB_API_KEY is not configured on the server.');
@@ -933,32 +1043,27 @@ async function fetchTmdb(path, queryParams = {}) {
     url.searchParams.set(key, String(val));
   });
 
-  const response = await fetch(url.toString(), {
+  return fetchScheduledJson(url.toString(), {
     headers: {
       'Accept': 'application/json',
       'User-Agent': 'Nuvio-Trakt-Bridge/1.0'
-    }
+    },
+    signal,
+    service: 'TMDB'
   });
-
-  if (!response.ok) {
-    throw new Error(`TMDB API HTTP error ${response.status}`);
-  }
-  return response.json();
 }
 
-async function fetchCinemeta(type, imdbId) {
+async function fetchCinemeta(type, imdbId, signal) {
   const cinemetaType = type === 'movie' ? 'movie' : 'series';
-  const url = `https://v3-cinemeta.strem.io/meta/${cinemetaType}/${imdbId}.json`;
-  const response = await fetch(url, {
+  const url = `https://v3-cinemeta.strem.io/meta/${cinemetaType}/${encodeURIComponent(imdbId)}.json`;
+  const data = await fetchScheduledJson(url, {
     headers: {
       'Accept': 'application/json',
       'User-Agent': 'Nuvio-Trakt-Bridge/1.0'
-    }
+    },
+    signal,
+    service: 'Cinemeta'
   });
-  if (!response.ok) {
-    throw new Error(`Cinemeta API HTTP error ${response.status}`);
-  }
-  const data = await response.json();
   const meta = data?.meta;
   return {
     posterUrl: meta?.poster || null,
@@ -967,177 +1072,119 @@ async function fetchCinemeta(type, imdbId) {
   };
 }
 
-app.post('/api/trakt/enrich-metadata', express.json({ limit: '10mb' }), async (req, res) => {
-  try {
-    const { items } = req.body;
-    if (!items || !Array.isArray(items)) {
-      return res.status(400).json({ error: 'items array is required' });
-    }
+async function resolveMetadata(item, { signal }) {
+  let resolvedTmdbId = item.tmdbId;
+  let sawTransientFailure = false;
 
-    const cache = readMetadataCache();
-    const results = [];
-
-    // Helper for concurrency limiting (max 5 parallel calls)
-    const limit = 5;
-    let index = 0;
-    
-    // Simple console tracking
-    let enrichedCount = 0;
-    let fallbackCount = 0;
-    let missingCount = 0;
-    let failedCount = 0;
-
-    async function worker() {
-      while (index < items.length) {
-        const currentIndex = index++;
-        const item = items[currentIndex];
-        const type = item.content_type === 'movie' ? 'movie' : 'series';
-        const name = item.name || 'Untitled';
-        const ids = item._ids || {};
-
-        const tmdbId = ids.tmdb;
-        const imdbId = ids.imdb;
-
-        if (!tmdbId && !imdbId) {
-          missingCount++;
-          console.log(`[Metadata] Missing IDs for "${name}" - cannot enrich.`);
-          results[currentIndex] = {
-            content_id: item.content_id,
-            posterUrl: null,
-            releaseDate: null,
-            source: 'missing'
-          };
-          continue;
-        }
-
-        const tmdbCacheKey = tmdbId ? `${type}:tmdb:${tmdbId}` : null;
-        const imdbCacheKey = imdbId ? `${type}:imdb:${imdbId}` : null;
-
-        // Cache lookup
-        let cachedVal = null;
-        if (tmdbCacheKey && cache[tmdbCacheKey]) {
-          cachedVal = cache[tmdbCacheKey];
-        } else if (imdbCacheKey && cache[imdbCacheKey]) {
-          cachedVal = cache[imdbCacheKey];
-        }
-
-        if (cachedVal) {
-          if (cachedVal.source === 'tmdb') enrichedCount++;
-          else if (cachedVal.source === 'cinemeta') fallbackCount++;
-          else if (cachedVal.source === 'failed') failedCount++;
-          
-          results[currentIndex] = {
-            content_id: item.content_id,
-            posterUrl: cachedVal.posterUrl,
-            releaseDate: cachedVal.releaseDate,
-            source: cachedVal.source,
-            fromCache: true
-          };
-          continue;
-        }
-
-        // Fetch
-        try {
-          const tmdbApiKey = process.env.TMDB_API_KEY;
-          let resolvedTmdbId = tmdbId;
-          let fetchSource = 'failed';
-          let posterUrl = null;
-          let releaseDate = null;
-
-          if (tmdbApiKey) {
-            if (!resolvedTmdbId && imdbId) {
-              const findRes = await fetchTmdb(`/3/find/${imdbId}`, { external_source: 'imdb_id' });
-              const resultsList = type === 'movie' ? findRes?.movie_results : findRes?.tv_results;
-              if (resultsList && resultsList.length > 0) {
-                resolvedTmdbId = resultsList[0].id;
-              }
-            }
-
-            if (resolvedTmdbId) {
-              if (type === 'movie') {
-                const detail = await fetchTmdb(`/3/movie/${resolvedTmdbId}`);
-                posterUrl = detail?.poster_path ? `https://image.tmdb.org/t/p/w500${detail.poster_path}` : null;
-                releaseDate = detail?.release_date || null;
-                fetchSource = 'tmdb';
-              } else {
-                const detail = await fetchTmdb(`/3/tv/${resolvedTmdbId}`);
-                posterUrl = detail?.poster_path ? `https://image.tmdb.org/t/p/w500${detail.poster_path}` : null;
-                releaseDate = detail?.first_air_date || null;
-                fetchSource = 'tmdb';
-              }
-            }
-          }
-
-          // Fallback to Cinemeta
-          if (fetchSource === 'failed' && imdbId) {
-            try {
-              const cinemeta = await fetchCinemeta(type, imdbId);
-              posterUrl = cinemeta.posterUrl;
-              releaseDate = cinemeta.releaseDate;
-              fetchSource = 'cinemeta';
-            } catch (e) {
-              // Ignore cinemeta fail
-            }
-          }
-
-          const cacheVal = {
-            posterUrl,
-            releaseDate,
-            source: fetchSource,
-            updatedAt: Date.now()
-          };
-
-          // Save to cache memory
-          if (tmdbCacheKey) cache[tmdbCacheKey] = cacheVal;
-          if (imdbCacheKey) cache[imdbCacheKey] = cacheVal;
-          if (resolvedTmdbId) {
-            cache[`${type}:tmdb:${resolvedTmdbId}`] = cacheVal;
-          }
-
-          // Logging
-          if (fetchSource === 'tmdb') {
-            enrichedCount++;
-            console.log(`[Metadata] Enriched item "${name}" (TMDB) - Poster: ${posterUrl}, Release: ${releaseDate}`);
-          } else if (fetchSource === 'cinemeta') {
-            fallbackCount++;
-            console.log(`[Metadata] Fallback Cinemeta item "${name}" - Poster: ${posterUrl}, Release: ${releaseDate}`);
-          } else {
-            failedCount++;
-            console.log(`[Metadata] Failed to enrich "${name}" (tried TMDB/Cinemeta)`);
-          }
-
-          results[currentIndex] = {
-            content_id: item.content_id,
-            posterUrl,
-            releaseDate,
-            source: fetchSource
-          };
-
-        } catch (err) {
-          failedCount++;
-          console.error(`[Metadata] Error enriching "${name}":`, err.message);
-          results[currentIndex] = {
-            content_id: item.content_id,
-            posterUrl: null,
-            releaseDate: null,
-            source: 'failed'
-          };
-        }
+  if (process.env.TMDB_API_KEY) {
+    try {
+      if (!resolvedTmdbId && item.imdbId) {
+        const findRes = await fetchTmdb(
+          `/3/find/${encodeURIComponent(item.imdbId)}`,
+          { external_source: 'imdb_id' },
+          signal
+        );
+        const matches = item.type === 'movie' ? findRes?.movie_results : findRes?.tv_results;
+        if (matches?.length) resolvedTmdbId = String(matches[0].id);
       }
+
+      if (resolvedTmdbId) {
+        const detail = await fetchTmdb(
+          item.type === 'movie' ? `/3/movie/${resolvedTmdbId}` : `/3/tv/${resolvedTmdbId}`,
+          {},
+          signal
+        );
+        return {
+          posterUrl: detail?.poster_path
+            ? `https://image.tmdb.org/t/p/w500${detail.poster_path}`
+            : null,
+          releaseDate: item.type === 'movie'
+            ? detail?.release_date || null
+            : detail?.first_air_date || null,
+          source: 'tmdb',
+          resolvedTmdbId
+        };
+      }
+    } catch (error) {
+      sawTransientFailure ||= isTransientMetadataError(error);
     }
+  }
 
-    const workers = Array.from({ length: Math.min(limit, items.length) }, worker);
-    await Promise.all(workers);
+  if (!signal?.aborted && item.imdbId) {
+    try {
+      const fallback = await fetchCinemeta(item.type, item.imdbId, signal);
+      return { ...fallback, resolvedTmdbId };
+    } catch (error) {
+      sawTransientFailure ||= isTransientMetadataError(error);
+    }
+  }
 
-    // Save cache to file
-    writeMetadataCache(cache);
+  return {
+    posterUrl: null,
+    releaseDate: null,
+    source: 'failed',
+    resolvedTmdbId,
+    cacheable: !sawTransientFailure && !signal?.aborted,
+    retryable: sawTransientFailure || signal?.aborted
+  };
+}
 
-    console.log(`[Metadata Sync] Completed enrichment batch: ${items.length} items. Enriched (TMDB): ${enrichedCount}, Fallback (Cinemeta): ${fallbackCount}, Missing: ${missingCount}, Failed: ${failedCount}`);
+const metadataEnricher = createMetadataEnricher({
+  cache: metadataCache,
+  fetchMetadata: resolveMetadata
+});
 
-    res.json({ results });
+app.post('/api/trakt/enrich-metadata', async (req, res) => {
+  const batchController = new AbortController();
+  let deadlineReached = false;
+  let clientAborted = false;
+  const batchTimeout = setTimeout(() => {
+    deadlineReached = true;
+    batchController.abort(timeoutError('Metadata enrichment batch deadline reached.'));
+  }, METADATA_BATCH_TIMEOUT_MS);
+  const abortForClient = () => {
+    clientAborted = true;
+    batchController.abort();
+  };
+  const abortForClosedResponse = () => {
+    if (!res.writableEnded) abortForClient();
+  };
+  req.once('aborted', abortForClient);
+  res.once('close', abortForClosedResponse);
+
+  try {
+    const { items } = req.body || {};
+    const { results, summary } = await metadataEnricher.enrich(items, {
+      signal: batchController.signal
+    });
+
+    console.log(
+      `[Metadata Sync] ${items.length} items; ${summary.uniqueFetches} unique misses; `
+      + `${summary.cached} cached; ${summary.enriched} TMDB; ${summary.fallback} Cinemeta; `
+      + `${summary.missing} missing IDs; ${summary.failed} failed.`
+    );
+
+    if (!clientAborted && !res.writableEnded) {
+      res.json({
+        results,
+        meta: {
+          ...summary,
+          partial: deadlineReached,
+          maxBatchItems: MAX_METADATA_BATCH_ITEMS
+        }
+      });
+    }
   } catch (error) {
     console.error('Enrichment batch endpoint error:', error);
-    res.status(500).json({ error: error.message });
+    if (!clientAborted && !res.headersSent) {
+      res.status(error.status || 500).json({
+        error: error.status ? error.message : 'Metadata enrichment failed.'
+      });
+    }
+  } finally {
+    clearTimeout(batchTimeout);
+    req.removeListener('aborted', abortForClient);
+    res.removeListener('close', abortForClosedResponse);
   }
 });
 

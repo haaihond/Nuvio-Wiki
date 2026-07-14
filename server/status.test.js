@@ -12,7 +12,14 @@ const ibbyLabsPayload = {
   services: [
     {
       id: 'nuvio-website', name: 'Nuvio Website', group: 'Nuvio', url: 'https://nuvio.tv/',
-      last: { state: 'UP', up: true, latency: 125, checkedAt: '2026-07-10T12:00:00.000Z' }
+      last: {
+        state: 'UP', up: true, status: 200, latency: 125, checkDuration: 180,
+        attemptCount: 1, checkedAt: '2026-07-10T12:00:00.000Z'
+      },
+      lastStateChangeAt: '2026-07-09T12:00:00.000Z',
+      upSince: '2026-07-01T12:00:00.000Z',
+      uptimePercent: 99.98,
+      uptimeWindows: { h1: 100, h12: 100, h24: 99.9, d7: 99.98, d30: null }
     },
     {
       id: 'community-addon', name: 'Community Addon', group: 'Addons', url: 'https://addon.example/',
@@ -94,6 +101,15 @@ test('normalizes Ibby Labs services and puts every Nuvio service first', () => {
   assert.equal(services[0].groupOrder, 0);
   assert.equal(services[0].name, 'Nuvio');
   assert.equal(services[0].latencyMs, 125);
+  assert.equal(services[0].httpStatus, 200);
+  assert.equal(services[0].checkDurationMs, 180);
+  assert.equal(services[0].attemptCount, 1);
+  assert.equal(services[0].uptimePercent, 99.98);
+  assert.deepEqual(services[0].uptimeWindows, {
+    h1: 100, h12: 100, h24: 99.9, d7: 99.98, d30: null
+  });
+  assert.equal(services[0].upSince, '2026-07-01T12:00:00.000Z');
+  assert.deepEqual(services[0].history, []);
   assert.equal(services[1].kind, 'community');
   assert.equal(services[1].group, 'Nuvio');
   assert.equal(services[1].groupOrder, 0);

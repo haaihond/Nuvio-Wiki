@@ -91,6 +91,12 @@ function hostnameFromUrl(value) {
   }
 }
 
+function boundedPercent(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const percent = Number(value);
+  return Number.isFinite(percent) ? Math.min(100, Math.max(0, percent)) : null;
+}
+
 function ibbyLabsState(last, maintenance) {
   const state = String(last?.state || last?.rawState || '').toUpperCase();
   if (maintenance || state === 'MAINTENANCE') return 'degraded';
@@ -115,8 +121,25 @@ export function normalizeIbbyLabsStatus(payload) {
       const last = service?.last || null;
       const status = ibbyLabsState(last, service?.maintenance);
       const checkedAt = last?.checkedAt || payload.generatedAt || null;
-      const latency = Number(last?.latency);
+      const latency = last?.latency === null || last?.latency === undefined
+        ? null
+        : Number(last.latency);
       const latencyMs = Number.isFinite(latency) ? Math.max(0, Math.round(latency)) : null;
+      const checkDuration = last?.checkDuration === null || last?.checkDuration === undefined
+        ? null
+        : Number(last.checkDuration);
+      const httpStatus = last?.status === null || last?.status === undefined
+        ? null
+        : Number(last.status);
+      const attemptCount = last?.attemptCount === null || last?.attemptCount === undefined
+        ? null
+        : Number(last.attemptCount);
+      const uptimeWindows = Object.fromEntries(
+        ['h1', 'h12', 'h24', 'd7', 'd30'].map((window) => [
+          window,
+          boundedPercent(service?.uptimeWindows?.[window])
+        ])
+      );
       const isNuvioService = group.trim().toLocaleLowerCase() === 'nuvio'
         || String(service?.id || '').startsWith('nuvio-');
       const isStremioService = group.trim().toLocaleLowerCase() === 'stremio'
@@ -134,7 +157,20 @@ export function normalizeIbbyLabsStatus(payload) {
         status,
         latencyMs,
         checkedAt,
-        history: checkedAt ? [{ status, latencyMs, checkedAt }] : []
+        history: [],
+        uptimePercent: boundedPercent(service?.uptimePercent),
+        uptimeWindows,
+        lastStateChangeAt: service?.lastStateChangeAt || null,
+        upSince: service?.upSince || null,
+        downSince: service?.downSince || null,
+        httpStatus: Number.isFinite(httpStatus) ? Math.round(httpStatus) : null,
+        checkDurationMs: Number.isFinite(checkDuration) ? Math.max(0, Math.round(checkDuration)) : null,
+        attemptCount: Number.isFinite(attemptCount) ? Math.max(1, Math.round(attemptCount)) : null,
+        statusDetail: service?.maintenance?.message
+          || last?.degradedReason
+          || last?.flapReason
+          || last?.error
+          || null
       };
     });
 
