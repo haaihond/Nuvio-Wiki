@@ -10,6 +10,7 @@
     "docs:preview": "vitepress preview docs",
     "docs:fix": "node scripts/update-docs.mjs",
     "server:dev": "npm --prefix server run dev",
+    "test:ai-markdown": "node --test docs/.vitepress/theme/components/aiMarkdown.test.ts",
     "test:badge-editor": "node --test docs/.vitepress/theme/components/badgeEditorUtils.test.ts",
     "test:profile-transfer": "node --test docs/.vitepress/theme/components/profileTransferMerge.test.ts"
   },

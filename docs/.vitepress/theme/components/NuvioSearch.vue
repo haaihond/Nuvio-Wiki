@@ -38,6 +38,7 @@ import {
   type Ref
 } from 'vue'
 import { useData } from 'vitepress'
+import { escapeHtml, renderMarkdown } from './aiMarkdown'
 
 /* ── Inline Helpers (copied from VitePress to avoid internal imports) ── */
 
@@ -646,124 +647,6 @@ async function sendAiMessage(text: string) {
   }
 }
 
-/* ── Lightweight markdown rendering ─────────────────────────────────────── */
-function escapeHtml(str: string) {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-}
-
-function renderMarkdown(text: string) {
-  if (!text) return ''
-
-  const codeBlocks: string[] = []
-  let html = text.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
-    const id = `__CODE_BLOCK_${codeBlocks.length}__`
-    codeBlocks.push(`<pre class="ask-ai-code"><code>${escapeHtml(code.trim())}</code></pre>`)
-    return id
-  })
-
-  html = escapeHtml(html)
-
-  const lines = html.split('\n')
-  const result: string[] = []
-  let inUl = false
-  let inOl = false
-
-  for (let line of lines) {
-    const trimmed = line.trim()
-
-    const headingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/)
-    if (headingMatch) {
-      if (inUl) { result.push('</ul>'); inUl = false; }
-      if (inOl) { result.push('</ol>'); inOl = false; }
-      const level = headingMatch[1].length
-      result.push(`<h${level} class="ask-ai-h${level}">${headingMatch[2]}</h${level}>`)
-      continue
-    }
-
-    const ulMatch = line.match(/^(\s*)[-*]\s+(.+)$/)
-    if (ulMatch) {
-      if (inOl) { result.push('</ol>'); inOl = false; }
-      if (!inUl) { result.push('<ul class="ask-ai-ul">'); inUl = true; }
-      result.push(`<li>${ulMatch[2]}</li>`)
-      continue
-    }
-
-    const olMatch = line.match(/^(\s*)\d+\.\s+(.+)$/)
-    if (olMatch) {
-      if (inUl) { result.push('</ul>'); inUl = false; }
-      if (!inOl) { result.push('<ol class="ask-ai-ol">'); inOl = true; }
-      result.push(`<li>${olMatch[2]}</li>`)
-      continue
-    }
-
-    if (trimmed === '') {
-      if (inUl) { result.push('</ul>'); inUl = false; }
-      if (inOl) { result.push('</ol>'); inOl = false; }
-      result.push('')
-      continue
-    }
-
-    if ((inUl || inOl) && (line.startsWith('  ') || line.startsWith('\t'))) {
-      if (result.length > 0) {
-        const last = result[result.length - 1]
-        if (last.endsWith('</li>')) {
-          result[result.length - 1] = last.slice(0, -5) + '<br>' + trimmed + '</li>'
-          continue
-        }
-      }
-    }
-
-    if (inUl && !ulMatch) { result.push('</ul>'); inUl = false; }
-    if (inOl && !olMatch) { result.push('</ol>'); inOl = false; }
-
-    result.push(trimmed)
-  }
-
-  if (inUl) result.push('</ul>')
-  if (inOl) result.push('</ol>')
-
-  let assembledHtml = ''
-  let currentPara: string[] = []
-
-  const flushPara = () => {
-    if (currentPara.length > 0) {
-      assembledHtml += `<p>${currentPara.join('<br>')}</p>`
-      currentPara = []
-    }
-  }
-
-  for (let item of result) {
-    if (item === '') {
-      flushPara()
-      continue
-    }
-
-    const isBlock = item.startsWith('<h') || item.startsWith('<ul') || item.startsWith('</ul>') || item.startsWith('<ol') || item.startsWith('</ol>') || item.startsWith('<li>') || item.startsWith('__CODE_BLOCK_')
-
-    if (isBlock) {
-      flushPara()
-      assembledHtml += item
-    } else {
-      currentPara.push(item)
-    }
-  }
-  flushPara()
-
-  assembledHtml = assembledHtml.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-  assembledHtml = assembledHtml.replace(/\*(.+?)\*/g, '<em>$1</em>')
-  assembledHtml = assembledHtml.replace(/`([^`]+)`/g, '<code class="ask-ai-inline-code">$1</code>')
-  assembledHtml = assembledHtml.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="ask-ai-link">$1</a>')
-
-  codeBlocks.forEach((codeHtml, idx) => {
-    assembledHtml = assembledHtml.replace(`__CODE_BLOCK_${idx}__`, codeHtml)
-  })
-
-  return assembledHtml
-}
 </script>
 
 <template>
