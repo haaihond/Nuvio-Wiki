@@ -27,7 +27,7 @@ I won't choose an indexer for you. For choosing one, I refer you to [this](https
 ### Step 1: Add your Torbox credentials
 1. Log in to your self-hosted **Aiostreams** instance with your admin credentials. 
 2. Then open the **dashboard**, open the **Usenet** dropdown, and select **providers**.
-3. In here, fill in your **Torbox** credentials, which can be found in the [tools page](https://torbox.app/tools). *Please note that **Torbox Pro** is required for this.*
+3. In here, fill in your **Torbox** credentials, which can be found in the [tools page](https://torbox.app/tools). *Please note that **Torbox Pro** is required for this, and the Usenet password only gets shown once*
 
 ### Step 2: Enable the service
 1. After this has been filled in, go back to your **configuration**.
