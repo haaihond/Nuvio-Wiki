@@ -305,7 +305,7 @@ export default defineConfig({
       level: [2, 3]
     },
     config(md) {
-      mermaidDiagrams(md)
+      mermaidDiagrams(md, { base })
       platformBadges(md)
     },
     theme: {
@@ -358,7 +358,6 @@ export default defineConfig({
       rollupOptions: {
         output: {
           manualChunks(id) {
-            if (id.includes('mermaid')) return 'mermaid'
             if (id.includes('P2PGenerator')) return 'p2p-generator'
           }
         }

@@ -2,6 +2,7 @@ node_modules/
 /.vitepress/
 docs/.vitepress/cache/
 docs/.vitepress/dist/
+/docs/public/mermaid/
 .DS_Store
 
 # AI server

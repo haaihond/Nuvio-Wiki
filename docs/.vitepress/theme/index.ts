@@ -1,6 +1,5 @@
 import DefaultTheme from 'vitepress/theme'
 import { defineAsyncComponent, h } from 'vue'
-import MermaidDiagram from './MermaidDiagram.vue'
 import WelcomePage from './components/WelcomePage.vue'
 import NuvioSidebar from './components/NuvioSidebar.vue'
 import MobileNavigation from './components/MobileNavigation.vue'
@@ -14,7 +13,6 @@ export default {
     'layout-top': () => [h(NuvioSidebar), h(MobileNavigation)]
   }),
   enhanceApp({ app }) {
-    app.component('MermaidDiagram', MermaidDiagram)
     app.component('P2PGenerator', defineAsyncComponent(() => import('./components/P2PGenerator.vue')))
     app.component('WelcomePage', WelcomePage)
     app.component('NuvioQuickstart', defineAsyncComponent(() => import('./components/NuvioQuickstart.vue')))
