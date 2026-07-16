@@ -16,7 +16,7 @@ A basic Usenet setup usually looks like this:
 | Search tool or indexer | Helps you find Usenet posts |
 | Newsreader / NZB client | Connects to your provider and retrieves articles |
 
-I recommend Torbox Pro as Usenet provider, as it covers both Usenet as Debrid and is easy to use. Don't have Torbox yet? Sign up with [my referral](https://torbox.app/subscription?referral=41d1ac85-ee5e-4699-9f0a-92e67cbc2fb2). This is also the example I'm going to use in this guide.
+I recommend Torbox Pro as Usenet provider, as it covers both Usenet and Debrid and is easy to use. Don't have Torbox yet? Sign up with [my referral](https://torbox.app/subscription?referral=41d1ac85-ee5e-4699-9f0a-92e67cbc2fb2). This is also the example I'm going to use in this guide.
 This guide will cover self-hosted Aiostreams as NZB client for the same reason. It is simply easy and fits right in your current debrid setup.
 I won't choose an indexer for you. For choosing one, I refer you to [this](https://gist.github.com/QINGCHARLES/307a7782dec86ff73a1f2b5b9c8f6c12) page for a curated indexer list.
 
