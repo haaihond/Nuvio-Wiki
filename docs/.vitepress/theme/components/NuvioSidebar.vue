@@ -317,7 +317,7 @@ onBeforeUnmount(() => {
       <div class="nuvio-sidebar__socials">
         <a
           class="nuvio-sidebar__social-link"
-          href="https://github.com/haaihond/Nuvio-Wiki-Website"
+          href="https://github.com/haaihond/Nuvio-Wiki"
           target="_blank"
           rel="noopener noreferrer"
           aria-label="Nuvio Wiki on GitHub"

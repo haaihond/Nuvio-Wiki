@@ -66,7 +66,7 @@ function backToTop() {
                 <path d="M20 15.5c0 2.5-2.7 4.5-6 4.5h-2l-4 2v-2.8c-2.4-1-4-2.9-4-5.2 0-3.3 3.6-6 8-6s8 2.7 8 6v1.5Z" />
               </svg>
             </a>
-            <a href="https://github.com/haaihond/Nuvio-Wiki-Website" target="_blank" rel="noreferrer" aria-label="Nuvio Wiki on GitHub">
+            <a href="https://github.com/haaihond/Nuvio-Wiki" target="_blank" rel="noreferrer" aria-label="Nuvio Wiki on GitHub">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-2c-2.8.6-3.4-1.2-3.4-1.2-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 0 1.6 1 1.6 1 .9 1.6 2.4 1.1 2.9.9.1-.7.4-1.1.7-1.4-2.3-.3-4.6-1.1-4.6-5A3.9 3.9 0 0 1 6.7 8.5c-.1-.3-.4-1.3.1-2.7 0 0 .9-.3 2.8 1.1a9.6 9.6 0 0 1 5.1 0c2-1.4 2.8-1.1 2.8-1.1.6 1.4.2 2.4.1 2.7a3.9 3.9 0 0 1 1 2.7c0 3.9-2.3 4.7-4.6 5 .4.3.7 1 .7 2V21c0 .3.2.6.7.5A10 10 0 0 0 12 2Z" />
               </svg>
@@ -99,7 +99,7 @@ function backToTop() {
           <span aria-hidden="true">&#9829;</span>
           Free &amp; open source -
           <a
-            href="https://github.com/haaihond/Nuvio-Wiki-Website/blob/main/CONTRIBUTING.md"
+            href="https://github.com/haaihond/Nuvio-Wiki/blob/main/CONTRIBUTING.md"
             target="_blank"
             rel="noreferrer"
           >consider contributing</a>

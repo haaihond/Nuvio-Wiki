@@ -6,7 +6,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $RemoteName = "website"
-$RepoUrl = "https://github.com/haaihond/Nuvio-Wiki-Website.git"
+$RepoUrl = "https://github.com/haaihond/Nuvio-Wiki.git"
 
 Set-Location -LiteralPath $PSScriptRoot
 

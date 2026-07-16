@@ -25,5 +25,8 @@
   "overrides": {
     "esbuild": "^0.28.1",
     "vite": "^6.4.2"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "5.2.8"
   }
 }

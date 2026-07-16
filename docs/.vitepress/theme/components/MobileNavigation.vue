@@ -405,7 +405,7 @@ onBeforeUnmount(() => {
         <div class="nuvio-mobile-drawer__utilities">
           <div class="nuvio-mobile-drawer__socials">
             <a
-              href="https://github.com/haaihond/Nuvio-Wiki-Website"
+              href="https://github.com/haaihond/Nuvio-Wiki"
               target="_blank"
               rel="noopener noreferrer"
               aria-label="Nuvio Wiki on GitHub"

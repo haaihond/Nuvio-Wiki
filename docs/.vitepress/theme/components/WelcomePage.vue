@@ -192,7 +192,7 @@ import { siteRoutes } from '../../routes.mts'
         <span>This project is community-maintained and is not affiliated with the official Nuvio development team.</span>
       </div>
       <div class="community-note__actions">
-        <a href="https://github.com/haaihond/Nuvio-Wiki-Website/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">
+        <a href="https://github.com/haaihond/Nuvio-Wiki/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">
           Contributing Guide
           <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4h9v9M16 4 6 14" /></svg>
         </a>

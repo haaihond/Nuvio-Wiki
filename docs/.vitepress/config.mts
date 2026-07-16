@@ -62,7 +62,7 @@ function buildNav(locale: WikiLocale): DefaultTheme.NavItem[] {
         { text: 'English (default)', link: '/' },
         {
           text: 'Help translate',
-          link: 'https://github.com/haaihond/Nuvio-Wiki-Website/blob/main/TRANSLATING.md'
+          link: 'https://github.com/haaihond/Nuvio-Wiki/blob/main/TRANSLATING.md'
         }
       ]
     })
@@ -200,7 +200,7 @@ const locales = {
   ),
   translate: {
     label: 'Help translate',
-    link: 'https://github.com/haaihond/Nuvio-Wiki-Website/blob/main/TRANSLATING.md',
+    link: 'https://github.com/haaihond/Nuvio-Wiki/blob/main/TRANSLATING.md',
     lang: 'en-US'
   }
 }
@@ -272,11 +272,11 @@ export default defineConfig({
 
     socialLinks: [
       { icon: 'discord', link: 'https://discord.gg/nuvio' },
-      { icon: 'github', link: 'https://github.com/haaihond/Nuvio-Wiki-Website' }
+      { icon: 'github', link: 'https://github.com/haaihond/Nuvio-Wiki' }
     ],
 
     editLink: {
-      pattern: 'https://github.com/haaihond/Nuvio-Wiki-Website/edit/main/docs/:path',
+      pattern: 'https://github.com/haaihond/Nuvio-Wiki/edit/main/docs/:path',
       text: 'Edit this page on GitHub'
     },
 
