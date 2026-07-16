@@ -239,6 +239,7 @@ let logoutController: AbortController | undefined
 let pollTimer: ReturnType<typeof setInterval> | undefined
 let previousFocus: HTMLElement | null = null
 let previousBodyOverflow = ''
+let ownsBodyScrollLock = false
 
 const traffic = computed(() => overview.value?.traffic || {})
 const runtime = computed(() => overview.value?.runtime || {})
@@ -518,8 +519,11 @@ function handleDocumentVisibility() {
 function activateDashboard() {
   if (typeof document === 'undefined') return
   previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
-  previousBodyOverflow = document.body.style.overflow
-  document.body.style.overflow = 'hidden'
+  if (document.body.style.overflow !== 'hidden') {
+    previousBodyOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    ownsBodyScrollLock = true
+  }
   nextTick(() => closeButton.value?.focus())
   refreshDashboard()
   startPolling()
@@ -529,7 +533,10 @@ function deactivateDashboard() {
   stopPolling()
   requestSequence += 1
   requestController?.abort()
-  if (typeof document !== 'undefined') document.body.style.overflow = previousBodyOverflow
+  if (typeof document !== 'undefined' && ownsBodyScrollLock) {
+    document.body.style.overflow = previousBodyOverflow
+    ownsBodyScrollLock = false
+  }
   previousFocus?.focus()
   previousFocus = null
 }
