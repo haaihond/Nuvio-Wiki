@@ -1,4 +1,4 @@
-import DefaultTheme from 'vitepress/theme'
+import DefaultTheme from 'vitepress/theme-without-fonts'
 import { defineAsyncComponent, h } from 'vue'
 import WelcomePage from './components/WelcomePage.vue'
 import NuvioSidebar from './components/NuvioSidebar.vue'
