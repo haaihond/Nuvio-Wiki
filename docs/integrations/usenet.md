@@ -16,7 +16,7 @@ A basic Usenet setup usually looks like this:
 | Search tool or indexer | Helps you find Usenet posts |
 | Newsreader / NZB client | Connects to your provider and retrieves articles |
 
-I recommend Torbox Pro as Usenet provider, as it covers both Usenet as Debrid and is easy to use. Don't have Torbox yet? Sign up with [my referral](https://torbox.app/subscription?referral=41d1ac85-ee5e-4699-9f0a-92e67cbc2fb2). This is also the example I'm going to use in this guide.
+I recommend Torbox Pro as Usenet provider, as it covers both Usenet and Debrid and is easy to use. Don't have Torbox yet? Sign up with [my referral](https://torbox.app/subscription?referral=41d1ac85-ee5e-4699-9f0a-92e67cbc2fb2). This is also the example I'm going to use in this guide.
 This guide will cover self-hosted Aiostreams as NZB client for the same reason. It is simply easy and fits right in your current debrid setup.
 I won't choose an indexer for you. For choosing one, I refer you to [this](https://gist.github.com/QINGCHARLES/307a7782dec86ff73a1f2b5b9c8f6c12) page for a curated indexer list.
 
@@ -43,8 +43,24 @@ I won't choose an indexer for you. For choosing one, I refer you to [this](https
 
 > [!IMPORTANT]
 > It can be that your indexer blocks your Aiostreams agent. To address this, go to **Dashboard** - **Settings** - **HTTP** and under **request header overrides** set: `[your-indexer-url] = {nzbhydra2}`.
-> For me, this was happening with **DrunkenSlug**, so under **request header overrides** I set: `"drunkenslug.com = {nzbhydra2}"`.
+> For me, this was happening with **DrunkenSlug**, so under **request header overrides** I set: `drunkenslug.com = {nzbhydra2}`.
 
 ---
 
 If anything else goes wrong, take a look at the server logs that can be found on the **dashboard**. If you can't find the fix on your own, ask around in the [Aiostreams Discord](https://discord.gg/cpsvCZPdg).
+
+
+## Additional Usenet Settings
+You're all set; below are some optional settings you can tweak. All of these are found on the dashboard.
+
+- **Max connections and Pipeline depth**
+  - Both of these are in the Usenet Providers settings. These two affect download speed from your Usenet Provider. I won't go in details what they do exactly. Just test what configuration works best for your specific network. There is a speedtest on this page to help you with exactly this.
+
+- **Multiple Usenet Providers**
+  - On the Usenet Provider page, you can add multiple Usenet providers. Users use multiple Usenet providers across **different backbones** to fill up missing files from their primary provider. In Aiostreams, you can set a provider as backup. This will let Aiostreams prefer your primary provider for most traffic and only use the backup to fill up missing articles. This can be helpful if the backup provider has download limits or is a block account.
+
+- **Usenet Settings**
+  - In the Usenet dropdown, an extensive settings page can be found. I won't go in detail over each one as it already has its own explanation.
+
+
+
