@@ -133,7 +133,7 @@ onMounted(restoreVote)
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 16px;
-  margin-top: 40px;
+  margin-bottom: 32px;
   padding: 14px 16px;
   border: 1px solid var(--vp-c-divider);
   border-radius: 10px;
@@ -255,7 +255,7 @@ onMounted(restoreVote)
   .page-feedback {
     grid-template-columns: 1fr;
     gap: 12px;
-    margin-top: 32px;
+    margin-bottom: 24px;
     padding: 14px;
   }
 

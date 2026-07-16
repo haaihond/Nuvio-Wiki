@@ -13,7 +13,7 @@ export default {
   extends: DefaultTheme,
   Layout: () => h(DefaultTheme.Layout, null, {
     'layout-top': () => [h(NuvioSidebar), h(MobileNavigation)],
-    'doc-after': () => h(PageFeedback)
+    'doc-footer-before': () => h(PageFeedback)
   }),
   enhanceApp({ app }) {
     app.component('P2PGenerator', defineAsyncComponent(() => import('./components/P2PGenerator.vue')))
