@@ -53,10 +53,11 @@ Nuvio's settings allow for deep customization. Below is a detailed breakdown, no
 
 [Back to top](#settings-breakdown)
 
-## 5. Buffer and Network: [View Playback Guide](player.md)
-These configurations govern internal memory allocation thresholds, local system caching pools, and network data transit rules.
+## 5. Buffer and Network [Android TV Only]: [View Playback Guide](player.md#buffer-and-network-android-tv-only)
+These configurations govern internal memory allocation thresholds, local system caching pools, and network data transit rules. Full detail lives under [Player Settings → Buffer and Network](player.md#buffer-and-network-android-tv-only).
 
-- **Custom Playback Buffers:** Completely overrides stock Media3 parameters with specialized processing limits:
+- **ExoPlayer Native Memory:** Relocates the ready-ahead playback buffer into a more efficient area of device memory so high-bitrate streams can maintain larger ahead-buffers without exhausting the app's limited private memory share on TV sticks and boxes. Displays device RAM and a recommended safety limit.
+- **Custom Playback Buffers:** Completely overrides stock Media3 parameters with specialized processing limits (works with or without Native Memory):
   - *Min / Max Buffer Duration:* Calibrates the safe minimum and maximum content duration thresholds to cache ahead of the active video cursor position.
   - *Initial Buffer & Buffer After Rebuffer:* Sets the precise buffering depth required before an initialized video stream boots, or when reclaiming feeds after a playback stall.
   - *Back Buffer Duration:* Holds already-viewed stream data inside local system memory arrays to enable instant seek-back actions without re-downloading source content.
@@ -64,7 +65,7 @@ These configurations govern internal memory allocation thresholds, local system 
 - **Disk Cache Performance:** Establishes fixed storage caching partitions:
   - *VOD Disk Cache:* Saves active downloaded file arrays directly onto internal storage to shield progressive media playback from momentary network drops.
   - *Auto Size:* Automates cache constraints targeting roughly 10% of total available free space, with manual overrides to maintain strict storage headroom margins.
-- **Network & P2P Stream Filters:** Deploys a *Custom Network* filter to open parallel download connections for progressive links. Includes a toggle to clear *P2P Streaming* chains for torrent configurations and options to *Hide torrent stats* overlays during playback screens.
+- **Network & P2P Stream Filters:** Deploys a *Custom Network* filter to open parallel download connections for progressive links when a CDN throttles single-connection speed. Independent of Native Memory. Includes *HTTP/2*, *Connection Count*, and *Chunk Size* controls, plus *P2P Streaming* and *Hide torrent stats* overlays. Use **Settings → Advanced → Stream Throughput Diagnostics** to compare baseline vs parallel speeds before leaving multi-connection mode on — see [Stream Throughput Diagnostics](player.md#stream-throughput-diagnostics-advanced-parallel-test).
 
 [Back to top](#settings-breakdown)
 

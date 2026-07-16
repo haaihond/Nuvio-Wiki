@@ -11,7 +11,8 @@
 **Playback & Offline Viewing 📼**
 1. Mobile Downloads: You can download media directly within the mobile app for offline playback, making it perfect for travel or commuting.
 2. Advanced Playback Engines: Under the hood, Nuvio uses high performance players natively built for each platform (AndroidX Media3, MPVKit, and AVFoundation for iOS) to handle modern codecs, subtitles, and hardware acceleration smoothly.
-3. Playback-Focused Interface: The UI is stripped of the clutter found in heavy scraper apps, focusing strictly on a clean, visual-first presentation for selecting and playing media.  
+3. ExoPlayer Native Memory & Buffer/Network controls (Android TV): Optional native buffer storage, custom buffer durations, and parallel CDN downloads for high-bitrate streams on TV sticks and boxes. See [Player Settings — Buffer and Network](settings/player.md#buffer-and-network-android-tv-only).
+4. Playback-Focused Interface: The UI is stripped of the clutter found in heavy scraper apps, focusing strictly on a clean, visual-first presentation for selecting and playing media.  
 
 **Integration & Tracking**
 1. Native Trakt Integration: Nuvio connects directly to your Trakt account to automatically track your watch progress, sync your history across all your devices, and pull in your personalized watchlists.

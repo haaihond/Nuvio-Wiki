@@ -66,10 +66,12 @@ Mismatched frame rates between the stream and your display can cause judder or d
 
 **Step 6 — Adjust buffer settings** [Android TV Only]
 
-On Android TV devices, you can manually increase how much video is pre-loaded into memory, which smooths out playback on slower or less stable connections.
+On Android TV devices, you can increase how much video is pre-loaded into memory, which smooths out playback on slower or less stable connections — especially for high-bitrate 4K streams.
 
-- Go to **Settings → Player → Buffer and Network → Custom Playback Buffers** and enable it (see [Player Settings](settings/player.md#buffer-and-network-android-tv-only)).
-- Increase **Min Buffer Duration** and **Max Buffer Duration** to give the player more runway ahead of your current position. Start conservatively (e.g., 15s min, 50s max) and raise from there if buffering continues.
+- Go to **Settings → Playback → Buffer & Network** and enable **ExoPlayer Native Memory** first. This relocates the ready-ahead buffer into a more efficient area of device memory on TV sticks and boxes. Full guide: [Player Settings — Buffer and Network](settings/player.md#buffer-and-network-android-tv-only).
+- If residual stalling continues, enable **Custom Playback Buffers** and raise **Min / Max Buffer Duration** to extend the content duration thresholds cached ahead of the active cursor.
+- For progressive streams, run **Settings → Advanced → Run Last Played Stream Speed Test** before enabling Parallel Connections — if baseline is already faster, leave parallel off (see [Stream Throughput Diagnostics](settings/player.md#stream-throughput-diagnostics-advanced-parallel-test)).
+- Retain **Managed Memory Budget** so Nuvio keeps target buffer allocations within a safe share of device memory.
 
 > [!NOTE]
 > Higher buffer values consume more RAM. Enable **Managed Memory Budget** to let Nuvio automatically cap buffer usage to a safe share of your device's available memory, which prevents instability on lower-end devices.
@@ -438,6 +440,7 @@ Automatically fetching all available subtitle tracks at startup can delay or int
 ### 7.2 High Memory Usage
 
 - Decoder efficiency significantly affects battery life. Go to **Settings → Player → Advanced Processing & Decoding → Decoder Priority** and set it to **Prefer device decoders** (see [Player Settings](settings/player.md#player-and-decoder-options)). This uses your hardware decoder chips when available, offloading work from the CPU and reducing battery drain compared to software (FFmpeg) decoding.
+- On Android TV, if the app or system UI becomes laggy during playback, re-enable **Managed Memory Budget**, disable **Allow Larger Target Buffer**, or use **Reset to default** on Buffer & Network. Oversized target buffer allocations can thrash system memory beyond the player process alone. See [Player Settings — Buffer and Network](settings/player.md#buffer-and-network-android-tv-only).
 - Avoid leaving Nuvio running in the background indefinitely. Close it fully when not in use.
 
 ---

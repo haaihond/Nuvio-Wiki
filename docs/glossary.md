@@ -14,6 +14,7 @@
 | **Catalog** | A curated row or category of content displayed directly on the Nuvio home screen. |
 | **Scraper** | The part of an addon that "searches" the internet for stream links. |
 | **MPV** | The powerful underlying video player software backend that Nuvio uses to play streams. |
+| **ExoPlayer Native Memory** | [Android TV] Relocates the ready-ahead playback buffer into a more efficient area of device memory so high-bitrate streams can maintain larger ahead-buffers on TV sticks and boxes. See [Player Settings — Buffer and Network](settings/player.md#buffer-and-network-android-tv-only). |
 | **Libass** | An advanced subtitle rendering engine used to properly display highly stylized text, commonly used in anime (ASS/SSA formats). |
 | **APK / IPA** | The installation file formats for Android and iOS, respectively. |
 | **Sideloading** | Installing an app from outside an official app store. |

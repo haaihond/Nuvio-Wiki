@@ -182,27 +182,346 @@ Technical settings that determine how your device's hardware and software proces
 
 ## Buffer and Network [Android TV Only]
 
-These settings manage how much video data is kept in memory and how peer-to-peer streams are handled.
+These configurations govern internal memory allocation thresholds, local system caching pools, and network data transit rules on Android TV.
+
+They live together under **Settings → Playback → Buffer & Network**, but they are **not all the same feature**:
+
+- **ExoPlayer Native Memory:** Optional engine path for how the buffer is stored in RAM.
+- **Custom Playback Buffers:** Time windows and target size for ahead-buffering. Works with or without Native Memory.
+- **Disk Cache:** Optional on-disk progressive cache.
+- **Custom Network / Parallel Connections:** Multi-connection downloads for progressive streams. Works with or without Native Memory.
+
+> [!IMPORTANT]
+> These options exist on the **Android TV** build of Nuvio only. They are not available on Mobile, iOS, or webOS.
+
+---
+
+### ExoPlayer Native Memory
+
+During playback, Nuvio continuously caches upcoming media ahead of the active cursor position so short network interruptions do not stall the stream. That reserve is the **buffer**.
+
+On many Android TV sticks and boxes, the application is constrained to a limited private memory footprint even when the device reports substantial total RAM. High-bitrate 4K and remux sources demand large ahead-buffers. When those buffers compete inside the app's restricted private share, users can encounter mid-playback stalls, laggy interface response, or process instability, even while free system memory still appears available.
+
+**ExoPlayer Native Memory** relocates that ready-ahead buffer into a more efficient native memory region and enables a streamlined data path through the ExoPlayer engine. In practical terms, Nuvio can retain more upcoming content without colliding with the device's usual per-app memory ceiling.
+
+When the mode is enabled, Nuvio also:
+
+- Applies a tuned starter profile for buffer durations, target allocation size, and parallel download behavior
+- Surfaces device memory detection and a **Recommended Safety Limit** beneath the toggle
+- Unlocks extended buffer duration ranges under **Custom Playback Buffers** compared with stock mode
+
+What Native Memory does **not** alter:
+
+- Picture quality, HDR tone mapping, or decoder selection
+- Network bandwidth itself. A source that exceeds your real download speed will still stall.
+- Playback under the **libmpv** internal engine. This path applies only to **ExoPlayer**.
+- Whether you *must* use Parallel Connections. Network settings remain independently configurable.
+
+> [!NOTE]
+> Devices must run **Android 8.0 (Oreo)** or newer. Older firmware displays a not-supported message under the toggle.
+
+**Enable Native Memory when:**
+
+- High-quality 1080p or 4K streams continue rebuffering despite a stable, sufficient connection
+- Scrubbing inside an already-buffered range feels sluggish on TV hardware
+- You routinely play debrid-backed remuxes or other large progressive sources on a stick or box
+
+**Leave Native Memory disabled when:**
+
+- Stock playback is already stable and you prefer default Media3 behavior
+- Enabling the mode introduces instability on very low-memory hardware
+- You are isolating a codec/renderer issue and want the simplest player memory path
+
+**Recommended baseline after enabling:**
+
+1. Enable **ExoPlayer Native Memory**.
+2. Keep **Managed Memory Budget** active.
+3. Leave remaining buffer sliders at the values Nuvio applies on enable.
+4. Evaluate with a representative title before applying manual overrides.
+5. Decide Parallel Connections separately via [Stream Throughput Diagnostics](#stream-throughput-diagnostics-advanced-parallel-test). Do not assume the starter network profile is ideal for every CDN.
+
+When active, the settings surface presents a readout similar to:
+
+> [!NOTE]
+> **Device Memory:** 4 GB  
+> **Recommended Safety Limit:** 1000 MB
+>
+> The safety limit is Nuvio's calibrated ceiling for target buffer allocations on the detected hardware tier. Remain at or below that threshold unless you intentionally accept elevated crash risk.
+
+[Back to top](#nuvio-player-settings)
+
+---
 
 ### Custom Playback Buffers
-Overrides Media3's default buffering with custom values. When off, the player uses stock Media3 buffer durations and target sizes.
-- **Min Buffer Duration:** Minimum amount of media to buffer. The player will try to ensure at least this much content is always buffered ahead of the current playback position.
-- **Max Buffer Duration:** Maximum amount of media to buffer. Must be at least the minimum buffer duration. Higher values use more memory but provide smoother playback on unstable connections.
-- **Initial Buffer:** How much content must be buffered before playback starts. Lower values start faster but may cause initial stuttering on slow connections.
-- **Buffer After Rebuffer:** How much content to buffer after playback stalls due to buffering. Higher values reduce repeated buffering interruptions.
-- **Back Buffer Duration:** How much already-played content to keep in memory. Enables fast backward seeking without re-downloading. Set to 0 to disable and save memory. (Reserves ~50MB on top of Target Buffer).
+
+Completely overrides stock Media3 parameters with specialized processing limits. When off, the player uses stock Media3 buffer durations and target sizes, or the Native Memory starter profile when that mode is on.
+
+These controls work **with or without** Native Memory. Native Memory changes *where* buffer data lives; Custom Playback Buffers change *how much time and RAM* the player targets.
+
+- **Min / Max Buffer Duration:** Calibrates the safe minimum and maximum content duration thresholds to cache ahead of the active video cursor position. Higher ceilings reduce stall frequency on unstable links but increase memory pressure. Native Memory unlocks a substantially longer duration range than stock mode.
+- **Initial Buffer:** Sets the precise buffering depth required before an initialized video stream boots. Lower values start faster but may cause initial stuttering on slow connections.
+- **Buffer After Rebuffer:** Sets the buffering depth required when reclaiming feeds after a playback stall. Higher values reduce repeated buffering interruptions.
+- **Back Buffer Duration:** Holds already-viewed stream data inside local system memory arrays to enable instant seek-back actions without re-downloading source content. Set to 0 to disable and save memory. The interface reports an estimated reserve held on top of Target Buffer.
 - **Managed Memory Budget:** Caps the buffer to a safe share of this device's memory. Turn off to set the Target Buffer Size yourself (advanced: large values can crash low-memory devices).
-- **Target Buffer Size:** Maximum RAM used for ahead-buffering. Calculated from your device's available memory. (Requires turning off Managed Memory Budget).
+- **Target Buffer Size:** Maximum RAM used for ahead-buffering. Calculated from your device's available memory. Requires turning off Managed Memory Budget. With Native Memory active, limits track total device memory tiers and the recommended safety limit.
 - **Allow Larger Target Buffer:** Removes the device-memory cap on the Target Buffer Size slider, allowing values up to 2GB. May crash on devices with less than 2GB of RAM.
 
+> [!WARNING]
+> Elevated buffer allocations are not universally beneficial. On low-RAM sticks, oversized targets can thrash system memory and degrade interface responsiveness. If Target Buffer Size surfaces an **orange** or **red** warning, return toward the recommended safety limit.
+
+Duration thresholds and target size interact: the player ceases loading when either the maximum duration window or the memory ceiling is reached. A long duration ceiling paired with a tiny target size still cannot retain substantial content.
+
+[Back to top](#nuvio-player-settings)
+
+---
+
 ### Disk Cache
-- **VOD Disk Cache:** Persist downloaded bytes to disk for the current stream. Extends instant seek-back beyond the in-memory back buffer and survives brief network drops. Only applies to progressive streams (no HLS/DASH).
-- **Auto Size:** When on, the cache is sized from free disk space. Turn off to pick a size manually. Auto mode targets about 10% of free space. Manual mode keeps about 1024MB headroom.
+
+Establishes fixed storage caching partitions that extend protection beyond pure in-memory buffering.
+
+- **VOD Disk Cache:** Saves active downloaded file arrays directly onto internal storage to shield progressive media playback from momentary network drops. Extends instant seek-back beyond the in-memory back buffer. Only applies to progressive streams (no HLS/DASH).
+- **Auto Size:** Automates cache constraints targeting roughly 10% of total available free space, with manual overrides to maintain strict storage headroom margins (about 1024MB headroom in manual mode).
+
+[Back to top](#nuvio-player-settings)
+
+---
 
 ### Network & P2P
-- **Custom Network:** Commands the download client to forge multiple parallel connections to fetch progressive streams (instead of a single connection) to maximize high-bandwidth networks.
+
+Deploys download-path controls that determine how aggressively progressive and torrent-style sources are fetched. These options are **independent of Native Memory**. You can use Parallel Connections with Native Memory off, or leave parallel off while Native Memory is on.
+
+- **Custom Network:** Master toggle for multi-connection progressive downloads. When off, the player uses a single connection for the stream.
+- **Enable HTTP/2:** Enables HTTP/2 protocol handling for supported endpoints, allowing request multiplexing and faster handshake times.
+- **Parallel Connections:** When Custom Network is on, downloads different byte ranges of a progressive file (MKV/MP4) across multiple TCP connections simultaneously. HLS/DASH already segment their own downloads and do not use this path.
+- **Connection Count:** Number of concurrent range connections. Higher values can raise throughput on CDNs that throttle per connection, but also increase memory and connection overhead.
+- **Chunk Size:** Size of each range request piece per connection. Larger chunks reduce request overhead; smaller chunks can adapt faster on some hosts.
 - **P2P Streaming:** Enables or restricts direct processing configurations for raw peer-to-peer (torrent) streams.
-- **Hide torrent stats:** Suppresses real-time peer connection logs, seed counts, and download speed overlays from appearing during loading and playback.
+- **Hide torrent stats:** Suppresses real-time peer connection logs, seed counts, and download speed overlays from appearing during loading and playback screens.
+
+#### Why parallel connections exist
+
+Many debrid and CDN hosts cap throughput on a **single** TCP connection (often in the tens to low hundreds of Mbps), even when your home link is much faster. Parallel range downloads open several connections and request different parts of the same file at once, so aggregate speed can climb closer to your real bandwidth.
+
+That only works when the host supports **HTTP byte ranges** (`Accept-Ranges: bytes` / `Content-Range`). If the CDN does not support ranges, Nuvio automatically falls back to a single connection. Enabling Parallel Connections then adds overhead with little or no gain.
+
+> [!TIP]
+> Parallel connections are most useful when your **internet is fast**, the **source is progressive** (not HLS/DASH), and the **CDN throttles single connections**. They are not a fix for an undersized link or an expired stream URL. Do not leave them on blindly; verify with the diagnostic below.
+
+[Back to top](#nuvio-player-settings)
+
+---
+
+### Stream Throughput Diagnostics (Advanced Parallel Test)
+
+Nuvio includes an advanced diagnostic that measures whether **your last played stream's host/CDN** actually benefits from parallel range downloads. Use this before leaving Parallel Connections permanently on.
+
+#### Where to run it
+
+1. Play a representative progressive stream once (so Nuvio records the stream URL and headers).
+2. Open **Settings → Advanced**.
+3. Select **Run Last Played Stream Speed Test** under **Stream Throughput Diagnostics**.
+
+If no playback has been recorded yet, the card shows that you must play a video first. Expired or unreachable links fail with a connection error. Play the title again and retest.
+
+#### What the test measures
+
+Each stage runs for about **8 seconds** against the last played stream host:
+
+| Result row | What it measures |
+| :--- | :--- |
+| **Standard Single Connection (Baseline)** | One normal download path (the default player behavior) |
+| **Parallel Connect (1 MB Chunks)** | Parallel range downloads with 1 MB pieces |
+| **Parallel Connect (4 MB Chunks)** | Same with 4 MB pieces |
+| **Parallel Connect (8 MB Chunks)** | Same with 8 MB pieces |
+| **Parallel Connect (16 MB Chunks)** | Same with 16 MB pieces |
+
+The parallel stages use the same multi-range pipeline as playback (multiple concurrent connections). When available, the card also shows **Average Video Bitrate** for the last stream so you can compare download speed against the file's needs.
+
+#### How to read the results
+
+Compare **Baseline** to the best **Parallel** row:
+
+
+##### 📊 Outcome Scenarios
+
+- **Scenario 1: Baseline is higher than (or roughly equal to) every Parallel result**
+  - **What it means:** The CDN already feeds a single connection well, or range parallelism does not help this host.
+  - **Recommendation:** Keep **Custom Network / Parallel Connections off**. Extra connections only burn memory and CPU.
+
+- **Scenario 2: One or more Parallel rows clearly beat Baseline** (for example +20% or more)
+  - **What it means:** The host/CDN benefits from multi-range fetching.
+  - **Recommendation:** Turn **Custom Network** on, enable **Parallel Connections**, and set **Chunk Size** to the winning test (1 / 4 / 8 / 16 MB). Start with **Connection Count 3–4**.
+
+- **Scenario 3: All Parallel rows are much lower than Baseline**
+  - **What it means:** Range requests may be unsupported, rate-limited, or inefficient on this CDN.
+  - **Recommendation:** Leave parallel **off**. Nuvio would also fall back to single-connection if ranges are rejected during real playback.
+
+- **Scenario 4: Parallel wins, but still below Average Video Bitrate**
+  - **What it means:** Network or host cannot sustain the file.
+  - **Recommendation:** Lower stream quality / pick a better source; parallel alone will not fix an undersized link.
+
+- **Scenario 5: Baseline already far above Average Video Bitrate**
+  - **What it means:** Single connection already has headroom.
+  - **Recommendation:** Prefer parallel **off** unless you still see rebuffers (then retest during a weaker evening network window).
+
+**Practical examples:**
+
+- Baseline **180 Mbps**, best Parallel **95 Mbps**, video bitrate **40 Mbps** → **leave parallel off**. Single connection is already plenty.
+- Baseline **45 Mbps**, Parallel 8 MB **140 Mbps**, video bitrate **60 Mbps** → **enable parallel**, Chunk Size **8 MB**, Connection Count **4**.
+- Baseline **30 Mbps**, all Parallel near **0 or failed** → host/link problem or expired URL; **do not** enable parallel; re-play and retest or change source.
+
+#### Applying results in Buffer & Network
+
+1. Go to **Settings → Playback → Buffer & Network**.
+2. If parallel won: enable **Custom Network** → **Parallel Connections**, set **Chunk Size** to the winning size, set **Connection Count** conservatively (Native Memory starter uses **4 × 16 MB**; only keep 16 MB if that row actually won).
+3. If baseline won: disable **Custom Network** or leave **Parallel Connections** off even if Native Memory turned parallel on as part of its starter profile.
+4. Re-test after changing debrid providers or major CDN hosts. Different hosts behave differently.
+
+> [!NOTE]
+> The general Fast.com / latency speed test on the Advanced screen measures overall internet capacity. The **Stream Throughput** test is different: it measures the **last played stream's CDN**, which is what matters for Parallel Connections.
+
+[Back to top](#nuvio-player-settings)
+
+---
+
+### Recommended Device Configurations
+
+Nuvio detects physical device RAM and maps it to a **Recommended Safety Limit** for target buffer allocations. Use the readout under **ExoPlayer Native Memory** (for example Device Memory: 4 GB, Recommended Safety Limit: 1000 MB) to identify your tier, then apply the matching profile below.
+
+> [!NOTE]
+> Enabling Native Memory applies a starter profile automatically: **Min 200s**, **Max 280s**, **Initial 1.5s**, **After Rebuffer 1.5s**, **Back Buffer 12s**, **Target Buffer = safety limit**, **Parallel Connections 4 × 16 MB**. Low-RAM tiers should dial those durations down; higher-RAM tiers can keep or extend them. Always re-validate Parallel Connections with Stream Throughput Diagnostics. The starter network values are not CDN-aware.
+
+#### Safety limits by device RAM
+
+These are the same thresholds Nuvio uses internally when Native Memory is active:
+
+| Detected device memory | Recommended safety limit (Target Buffer) | Warning zone begins around |
+| :--- | :--- | :--- |
+| ~1 GB | **150 MB** | 180 MB |
+| ~1.5 GB | **200 MB** | 250 MB |
+| ~2 GB | **250 MB** | 325 MB |
+| ~3 GB | **500 MB** | 650 MB |
+| ~4 GB | **1000 MB** | 1200 MB |
+| ~6 GB | **1600 MB** | 2000 MB |
+| 8 GB+ | **2000 MB** | 2500 MB |
+
+Stay at or under the safety limit unless you intentionally accept elevated crash risk. **Allow Larger Target Buffer** can open the slider as high as **2 GB**, but that path is advanced-only.
+
+#### Low-RAM sticks (~1–2 GB), Fire TV Stick class and similar
+
+Typical devices: Fire TV Stick Lite / 4K (older), budget Android sticks, entry Chromecast-class hardware.
+
+| Setting | Recommended value |
+| :--- | :--- |
+| **ExoPlayer Native Memory** | **On** |
+| **Managed Memory Budget** | **On** |
+| **Target Buffer Size** | Leave managed (**150–250 MB** by tier) |
+| **Allow Larger Target Buffer** | **Off** |
+| **Min Buffer Duration** | **60–90 s** (lower than the 200s starter if the UI feels laggy) |
+| **Max Buffer Duration** | **90–120 s** |
+| **Initial Buffer** | **1.5–3 s** |
+| **Buffer After Rebuffer** | **1.5–3 s** |
+| **Back Buffer Duration** | **5–12 s** (prefer **0–5 s** if memory is tight) |
+| **Custom Network / Parallel Connections** | Prefer **Off** unless Stream Throughput Diagnostics shows parallel clearly beating baseline |
+| **Chunk Size** | Only if parallel wins: prefer **4–8 MB** (avoid the 16 MB starter on weak sticks) |
+
+**Guidance:** Native Memory remains useful on this tier because the safety limit stays modest, but the automatic **200s / 280s** duration profile can over-commit weak sticks. After enabling Native Memory, open **Custom Playback Buffers** and reduce Min/Max if menus stutter during playback. Prefer 1080p over heavy remuxes when the connection or chipset is limited. Run the Advanced stream speed test before keeping parallel on. Low-RAM devices pay more for multi-connection overhead.
+
+#### Mid-range boxes (~3–4 GB)
+
+Typical devices: many mid-tier Android TV boxes, Google TV streamers with 3–4 GB, stronger Fire TV / Nvidia-class entry units.
+
+| Setting | Recommended value |
+| :--- | :--- |
+| **ExoPlayer Native Memory** | **On** |
+| **Managed Memory Budget** | **On** |
+| **Target Buffer Size** | Leave managed (**500 MB** on ~3 GB, **1000 MB** on ~4 GB) |
+| **Allow Larger Target Buffer** | **Off** (unless deliberately testing) |
+| **Min Buffer Duration** | **120–200 s** (starter **200 s** is usually fine) |
+| **Max Buffer Duration** | **200–280 s** (starter **280 s** is usually fine) |
+| **Initial Buffer** | **1.5 s** |
+| **Buffer After Rebuffer** | **1.5–3 s** |
+| **Back Buffer Duration** | **12 s** |
+| **Custom Network** | **On only if** Stream Throughput Diagnostics shows parallel beating baseline |
+| **Parallel Connections** | **3–4** when parallel wins |
+| **Chunk Size** | Match the winning diagnostic row (**4 / 8 / 16 MB**) |
+
+**Guidance:** This is the “leave the buffer starter profile alone” tier for most debrid-backed 1080p and many 4K streams. If high-bitrate remuxes still rebuffer, raise **Min / Max Buffer Duration** first (for example Min **200 s**, Max **320–400 s**) rather than pushing Target Buffer Size into the orange/red warning zone. Keep Managed Memory Budget on so Target stays at the safety limit (**500 MB** or **1000 MB**). For network: if baseline already exceeds video bitrate with headroom, leave parallel **off** even though Native Memory’s starter may enable it.
+
+#### Higher-end boxes (~6 GB)
+
+Typical devices: higher-spec Android TV / Google TV boxes with 6 GB RAM.
+
+| Setting | Recommended value |
+| :--- | :--- |
+| **ExoPlayer Native Memory** | **On** |
+| **Managed Memory Budget** | **On** (Target ≈ **1600 MB**) |
+| **Allow Larger Target Buffer** | Optional; only if Managed Budget is off and you stay under **~2000 MB** warning |
+| **Min Buffer Duration** | **200–300 s** |
+| **Max Buffer Duration** | **280–480 s** |
+| **Initial Buffer** | **1.5 s** |
+| **Buffer After Rebuffer** | **1.5–3 s** |
+| **Back Buffer Duration** | **12–30 s** |
+| **Custom Network** | Confirm with Stream Throughput Diagnostics first |
+| **Parallel Connections** | **4–8** when parallel clearly beats baseline |
+| **Chunk Size** | Winning diagnostic size; **16 MB** only if that row wins |
+
+**Guidance:** Extended duration windows are appropriate for heavy 4K remux binge sessions. Prefer duration headroom over crossing the warning limit (**~2000 MB**). On gigabit links, parallel often helps only when the CDN caps single-connection speed. Always compare against baseline before raising connection count.
+
+#### Flagship / high-RAM boxes (8 GB+)
+
+Typical devices: flagship Android TV boxes, mini PCs running Android TV builds, high-memory NVIDIA / Amlogic platforms.
+
+| Setting | Recommended value |
+| :--- | :--- |
+| **ExoPlayer Native Memory** | **On** |
+| **Managed Memory Budget** | **On** (Target ≈ **2000 MB**) or manual at the safety limit |
+| **Allow Larger Target Buffer** | Optional advanced path up to **2 GB**; treat values above the safety limit as experimental |
+| **Min Buffer Duration** | **200–400 s** |
+| **Max Buffer Duration** | **280–600 s** (higher only if still rebuffering on very large remuxes) |
+| **Initial Buffer** | **1.5 s** |
+| **Buffer After Rebuffer** | **1.5–3 s** |
+| **Back Buffer Duration** | **12–60 s** for frequent reverse seeks |
+| **Custom Network** | Confirm with Stream Throughput Diagnostics first |
+| **Parallel Connections** | **4–8** when parallel wins (higher counts only if tests keep scaling) |
+| **Chunk Size** | Winning diagnostic size (**8–16 MB** typical) |
+
+**Guidance:** This tier can sustain long ahead-buffers for pristine 4K/HDR remuxes. Still respect orange/red Target Buffer warnings. Larger is not automatically smoother once the safety limit is already filling the pipeline. Do not enable parallel solely because RAM is high. Enable it only when the Advanced stream test shows multi-range throughput beating baseline on that CDN.
+
+#### Quick “I just want it to work” path
+
+1. Enable **ExoPlayer Native Memory** (optional but recommended on TV hardware for large files).
+2. Confirm the **Device Memory / Recommended Safety Limit** line matches your hardware class.
+3. Keep **Managed Memory Budget** on.
+4. On **~1–2 GB** devices only: open **Custom Playback Buffers** and lower Min/Max to roughly **60–120 s**.
+5. On **3 GB+** devices: leave the buffer starter profile and test a representative stream before changing durations.
+6. Play a progressive stream, then run **Settings → Advanced → Run Last Played Stream Speed Test**. If **Baseline ≥ best Parallel**, turn **Custom Network / Parallel Connections off** (even if Native Memory enabled them). If Parallel wins, keep it on with the winning chunk size.
+
+[Back to top](#nuvio-player-settings)
+
+---
+
+### Buffer & Network tips
+
+- **Resolve source and network constraints first.** A high-bitrate remux on an undersized connection will stall regardless of buffer ceilings. Align stream quality with measured bandwidth and prefer cached debrid sources when available. See [Troubleshooting](../troubleshooting.md#11-video-stutters-or-buffers).
+- **Treat Native Memory and Parallel Connections as separate decisions.** One optimizes buffer storage. The other optimizes the download path to a specific CDN.
+- **Do not push every slider to the maximum.** Remember that Nuvio TV is not the only process on your device. The TV OS, launcher, system services, and other background apps still need memory. Forcing very high Target Buffer Size, long max durations, aggressive parallel chunks, or **Allow Larger Target Buffer** can leave the system short on RAM. Android then starts killing background apps and reclaiming memory mid-playback, which often shows up as dropped frames, hitching, laggy remote input, or the player stuttering even though the stream itself is fine. Stay near the recommended safety limit and leave headroom for the rest of the TV.
+- **Apply changes incrementally.** Enable Native Memory, evaluate, then adjust duration thresholds only if residual stalling persists.
+- **Restart the stream after major buffer changes** so the player rebuilds load-control and allocation parameters cleanly.
+- **Use Reset to default** on Buffer & Network if manual calibration becomes unstable, then re-enable only the options you still need and retest.
+- **Respect on-screen warnings** under Target Buffer Size: orange indicates above the recommended safe limit; red indicates elevated crash risk.
+
+**Does Native Memory improve picture quality?**  
+No. It only relocates and optimizes how upcoming media is stored ahead of the cursor.
+
+**Does Native Memory operate with libmpv?**  
+No. Set the internal engine to **ExoPlayer** to use Native Memory. Parallel Connections also apply to the ExoPlayer progressive path.
+
+**Native Memory is on, but the stream still rebuffers.**  
+Verify connection speed and source health first. Then raise Min/Max Buffer Duration and/or run Stream Throughput Diagnostics for parallel downloads.
+
+**The interface freezes or remote input feels laggy during playback.**  
+Re-enable **Managed Memory Budget**, disable **Allow Larger Target Buffer**, or apply **Reset to default**. Oversized allocations can thrash system memory beyond the player process alone.
 
 [Back to top](#Nuvio-player-settings)
 
