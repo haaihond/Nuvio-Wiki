@@ -43,7 +43,7 @@ I won't choose an indexer for you. For choosing one, I refer you to [this](https
 
 > [!IMPORTANT]
 > It can be that your indexer blocks your Aiostreams agent. To address this, go to **Dashboard** - **Settings** - **HTTP** and under **request header overrides** set: `[your-indexer-url] = {nzbhydra2}`.
-> For me, this was happening with **DrunkenSlug**, so under **request header overrides** I set: `"drunkenslug.com = {nzbhydra2}"`.
+> For me, this was happening with **DrunkenSlug**, so under **request header overrides** I set: `drunkenslug.com = {nzbhydra2}`.
 
 ---
 
