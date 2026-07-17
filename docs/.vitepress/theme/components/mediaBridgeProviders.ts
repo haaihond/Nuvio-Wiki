@@ -2114,6 +2114,7 @@ async function pushStremio(options: PushOptions): Promise<PushResult> {
     (Array.isArray(currentRows) ? currentRows : []).map((item: any) => [String(item._id), item])
   )
   const written: PushCounts = { history: 0, progress: 0, library: 0 }
+  const skipped: PushCounts = { history: 0, progress: 0, library: 0 }
   const issues: BridgeIssue[] = []
   const byId = new Map<string, {
     history: HistoryRecord[]
@@ -2247,6 +2248,16 @@ async function pushStremio(options: PushOptions): Promise<PushResult> {
 
     if (group.progress.length && videos.length) {
       const latest = [...group.progress].sort((a, b) => b.updatedAt - a.updatedAt)[0]
+      const superseded = group.progress.length - 1
+      if (superseded > 0) {
+        skipped.progress += superseded
+        issues.push({
+          scope: 'progress',
+          status: 'note',
+          media: latest.media,
+          reason: `Stremio stores one continue-watching position per series; ${superseded} older resume point${superseded === 1 ? '' : 's'} for ${mediaLabel(latest.media)} ${superseded === 1 ? 'was' : 'were'} skipped in favor of the newest.`
+        })
+      }
       const mapping = resolveStremioEpisode(latest.media, videos)
       if (mapping.status !== 'mapped') {
         issues.push({ scope: 'progress', status: mapping.status, media: latest.media, reason: mapping.reason })
@@ -2275,7 +2286,17 @@ async function pushStremio(options: PushOptions): Promise<PushResult> {
     })
   }
   logTo(log, `Merged ${changes.length} Stremio library-state records.`)
-  return { written, issues }
+  return {
+    written,
+    issues,
+    skipped,
+    // datastorePut returns one success response for the submitted batch. The
+    // official Stremio sync flow treats that response as authoritative instead
+    // of immediately reading the same records back. A direct reread can lag and
+    // otherwise turn successful writes into false verification warnings.
+    confirmedScopes: (['history', 'progress', 'library'] as const)
+      .filter(scope => scopes[scope])
+  }
 }
 
 export interface DestinationMappingIssue {

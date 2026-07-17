@@ -58,7 +58,7 @@ const props = withDefaults(defineProps<{
 const { lang } = useData()
 const isDutch = computed(() => String(lang.value || '').startsWith('nl'))
 const copy = computed(() => isDutch.value ? {
-  title: 'Nuvio Sync Bridge',
+  title: 'Sync Bridge',
   subtitle: 'Verplaats kijkgeschiedenis, voortgang en opgeslagen titels tussen Simkl, Stremio, Trakt en Nuvio.',
   info: 'Koppel een bron en bestemming en start direct met synchroniseren. Een voorbeeld bekijken is optioneel. Bestaande bestemmingsgegevens blijven behouden.',
   source: 'Bron',
@@ -131,7 +131,7 @@ const copy = computed(() => isDutch.value ? {
   supportMessage: 'If this helped you out or saved you some time, consider supporting me. ❤️',
   supportButton: 'Support me on Ko-fi'
 } : {
-  title: 'Nuvio Sync Bridge',
+  title: 'Sync Bridge',
   subtitle: 'Move watch history, playback progress, and saved titles between Simkl, Stremio, Trakt, and Nuvio.',
   info: 'Connect a source and destination and start syncing directly. Previewing changes is optional. Existing destination data is preserved.',
   source: 'Source',

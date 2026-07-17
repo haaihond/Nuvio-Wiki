@@ -40,6 +40,19 @@ function simklConnection(): BridgeConnection {
   }
 }
 
+function stremioConnection(): BridgeConnection {
+  return {
+    slot: 'destination',
+    service: 'stremio',
+    accountId: 'test-account',
+    displayName: 'Test Stremio account',
+    credentials: {
+      service: 'stremio',
+      authKey: 'test-auth-key'
+    }
+  }
+}
+
 function movieProgress(percentage: number, imdb = 'tt2015381') {
   return {
     media: {
@@ -258,6 +271,113 @@ test('stops the Simkl progress phase and skips the remainder when its budget exp
   assert.equal(result.issues.length, 1)
   assert.equal(result.issues[0].status, 'note')
   assert.match(result.issues[0].reason, /stopped after 30 seconds; 2 resume points were skipped/)
+})
+
+test('confirms successful Stremio batches and explains superseded series resume points', async t => {
+  const requests: Array<{ path: string; body: any }> = []
+  t.mock.method(globalThis, 'fetch', async (input, init) => {
+    const url = new URL(String(input))
+    const body = init?.body ? JSON.parse(String(init.body)) : null
+    requests.push({ path: url.pathname, body })
+
+    if (url.pathname === '/api/datastoreGet') {
+      return Response.json({ result: [] })
+    }
+    if (url.pathname === '/api/datastorePut') {
+      return Response.json({ result: { success: true } })
+    }
+    if (url.pathname === '/meta/series/tt0944947.json') {
+      return Response.json({
+        meta: {
+          id: 'tt0944947',
+          name: 'Game of Thrones',
+          videos: [
+            { id: 'tt0944947:2:3', season: 2, episode: 3, title: 'What Is Dead May Never Die' },
+            { id: 'tt0944947:2:4', season: 2, episode: 4, title: 'Garden of Bones' }
+          ]
+        }
+      })
+    }
+    throw new Error(`Unexpected request: ${url}`)
+  })
+
+  const bundle = createEmptyBundle()
+  bundle.progress.push(
+    {
+      media: {
+        kind: 'series',
+        ids: { imdb: 'tt0944947' },
+        title: 'Game of Thrones',
+        season: 2,
+        episode: 3
+      },
+      positionMs: 1_200_000,
+      durationMs: 3_600_000,
+      updatedAt: Date.UTC(2026, 6, 16)
+    },
+    {
+      media: {
+        kind: 'series',
+        ids: { imdb: 'tt0944947' },
+        title: 'Game of Thrones',
+        season: 2,
+        episode: 4
+      },
+      positionMs: 1_800_000,
+      durationMs: 3_600_000,
+      updatedAt: Date.UTC(2026, 6, 17)
+    }
+  )
+
+  const result = await pushMediaBridge({
+    connection: stremioConnection(),
+    bundle,
+    scopes: { history: false, progress: true, library: false }
+  })
+
+  const put = requests.find(request => request.path === '/api/datastorePut')
+  assert.equal(put?.body.changes.length, 1)
+  assert.equal(put?.body.changes[0].state.video_id, 'tt0944947:2:4')
+  assert.equal(result.written.progress, 1)
+  assert.equal(result.skipped?.progress, 1)
+  assert.deepEqual(result.confirmedScopes, ['progress'])
+  assert.equal(result.issues.length, 1)
+  assert.match(result.issues[0].reason, /one continue-watching position per series/)
+  assert.match(result.issues[0].reason, /skipped in favor of the newest/)
+})
+
+test('treats a successful Stremio saved-title batch as confirmed', async t => {
+  const savedIds = ['tt3100011', 'tt3100012', 'tt3100013', 'tt3100014']
+  t.mock.method(globalThis, 'fetch', async (input, init) => {
+    const url = new URL(String(input))
+    if (url.pathname === '/api/datastoreGet') return Response.json({ result: [] })
+    if (url.pathname === '/api/datastorePut') return Response.json({ result: { success: true } })
+    if (url.pathname.startsWith('/meta/movie/')) {
+      const id = url.pathname.match(/(tt\d+)\.json$/)?.[1]
+      return Response.json({ meta: { id, name: id } })
+    }
+    throw new Error(`Unexpected request: ${url}`)
+  })
+
+  const bundle = createEmptyBundle()
+  for (const [index, imdb] of savedIds.entries()) {
+    bundle.library.push({
+      media: { kind: 'movie', ids: { imdb }, title: `Saved ${index + 1}` },
+      addedAt: Date.UTC(2026, 6, 17, 12, index),
+      lists: [{ service: 'trakt', kind: 'watchlist' }]
+    })
+  }
+
+  const result = await pushMediaBridge({
+    connection: stremioConnection(),
+    bundle,
+    scopes: { history: false, progress: false, library: true }
+  })
+
+  assert.equal(result.written.library, 4)
+  assert.equal(result.skipped?.library, 0)
+  assert.deepEqual(result.confirmedScopes, ['library'])
+  assert.deepEqual(result.issues, [])
 })
 
 test('treats an accepted Simkl history no-op as confirmed without requiring a newer timestamp', async t => {

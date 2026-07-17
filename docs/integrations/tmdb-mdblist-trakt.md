@@ -75,7 +75,7 @@ After authenticating, customize your tracking features.
 - **Comments:** Toggle on to show Trakt user reviews on detail metadata pages.
 - **More Like This source:** Choose where recommendations come from on detail pages (e.g., Trakt).
 
-#### Nuvio Sync Bridge
+#### Sync Bridge
 
 Use the web-based Sync Bridge to preview and transfer supported tracking data in any direction between **Simkl**, **Stremio**, **Trakt**, and **Nuvio**. Every source and destination pairing is available, including transfers between different accounts on the same service or different profiles within Nuvio.
 
@@ -83,7 +83,7 @@ Use the web-based Sync Bridge to preview and transfer supported tracking data in
 
 **How to use the Sync Bridge:**
 
-1. Open the [Nuvio Sync Bridge](/tools#sync-bridge).
+1. Open the [Sync Bridge](/tools#sync-bridge).
 2. Choose the **From** and **To** services.
 3. Connect the source and destination separately. For a same-service transfer, use different accounts; for Nuvio, choose a different destination account or profile.
 4. Select the data categories available for that pairing, such as watched history, playback progress, watchlist, or collection.

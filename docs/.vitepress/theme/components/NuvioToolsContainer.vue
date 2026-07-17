@@ -57,7 +57,7 @@ const tabs: ToolTab[] = [
     id: 'sync-bridge',
     label: 'Sync Bridge',
     description: 'Sync Simkl, Stremio, Trakt, and Nuvio.',
-    title: 'Nuvio Sync Bridge',
+    title: 'Sync Bridge',
     details: 'Preview and transfer watched history, playback progress, watchlists, and collections in any direction between Simkl, Stremio, Trakt, and Nuvio—including different accounts or profiles on the same service.',
     component: markRaw(defineAsyncComponent(() => import('./NuvioTraktBridge.vue'))),
     props: { defaultExpanded: true, hideTip: true, hideHeader: true },
