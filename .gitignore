@@ -17,6 +17,9 @@ server/metadata-cache.sqlite-wal
 server/admin-data.sqlite
 server/admin-data.sqlite-shm
 server/admin-data.sqlite-wal
+server/profile-shares.sqlite
+server/profile-shares.sqlite-shm
+server/profile-shares.sqlite-wal
 server/node_modules/
 
 # Scratch files

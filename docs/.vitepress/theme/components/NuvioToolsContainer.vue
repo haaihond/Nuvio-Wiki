@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, markRaw, ref, onMounted, onUnmounted } from 'vue'
 
-type ToolId = 'quickstart' | 'badge-editor' | 'p2p' | 'trakt' | 'profile-transfer'
+type ToolId = 'quickstart' | 'badge-editor' | 'p2p' | 'trakt' | 'configuration-profiles' | 'profile-transfer'
 
 type ToolTab = {
   id: ToolId
@@ -55,13 +55,26 @@ const tabs: ToolTab[] = [
   },
   {
     id: 'trakt',
-    label: 'Trakt Bridge',
-    description: 'Import history and progress from Trakt.',
-    title: 'Nuvio Trakt Bridge',
-    details: 'Synchronize your watched history, continue watching progress, and library between Trakt and Nuvio Sync.',
+    label: 'Sync Bridge',
+    description: 'Sync Simkl, Stremio, Trakt, and Nuvio.',
+    title: 'Nuvio Sync Bridge',
+    details: 'Preview and transfer watched history, playback progress, watchlists, and collections in any direction between Simkl, Stremio, Trakt, and Nuvio—including different accounts or profiles on the same service.',
     component: markRaw(defineAsyncComponent(() => import('./NuvioTraktBridge.vue'))),
     props: { defaultExpanded: true, hideTip: true, hideHeader: true },
+    workspace: true,
     icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="tab-icon-svg"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>`
+  },
+  {
+    id: 'configuration-profiles',
+    label: 'Configuration Profiles',
+    description: 'Build a safe setup and share it with a short code.',
+    title: 'Nuvio Configuration Profiles',
+    details: 'Create an editable setup plan for add-ons and non-secret preferences, then share it without exposing credentials.',
+    component: markRaw(defineAsyncComponent(() => import('./NuvioConfigurationProfiles.vue'))),
+    props: {},
+    workspace: true,
+    showHeader: false,
+    icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="tab-icon-svg"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="m17 3 4 4-9 9-5 1 1-5 9-9Z"/><path d="M14 5l4 4"/></svg>`
   },
   {
     id: 'profile-transfer',
@@ -157,7 +170,7 @@ const selectTab = (id: ToolId) => {
 
 .tools-tabs {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   background: var(--tool-surface);
   padding: 10px;

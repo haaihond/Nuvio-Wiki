@@ -16,6 +16,12 @@ import { runSetup, SetupError } from './quickstart/services.js';
 import { getStatusOverview } from './status.js';
 import { createTraktOAuthStateStore } from './trakt-oauth.js';
 import {
+  buildSimklAuthorizationUrl,
+  createSimklOAuthStateStore,
+  exchangeSimklAuthorizationCode,
+  renderSimklOAuthCallback
+} from './simkl-oauth.js';
+import {
   createAdminDataStore,
   DEFAULT_ADMIN_TRAFFIC_MAX_ENTRIES
 } from './admin-data.js';
@@ -23,6 +29,10 @@ import {
   createMetadataCache,
   DEFAULT_METADATA_CACHE_MAX_ENTRIES
 } from './metadata-cache.js';
+import {
+  createProfileShareStore,
+  ProfileShareValidationError
+} from './profile-shares.js';
 import {
   createMetadataEnricher,
   createRequestScheduler,
@@ -57,6 +67,17 @@ const METADATA_CACHE_DB_FILE = process.env.METADATA_CACHE_DB_FILE
 const ADMIN_DATA_DB_FILE = process.env.ADMIN_DATA_DB_FILE
   ? resolve(process.env.ADMIN_DATA_DB_FILE)
   : join(__dirname, 'admin-data.sqlite');
+const PROFILE_SHARE_DB_FILE = process.env.PROFILE_SHARE_DB_FILE
+  ? resolve(process.env.PROFILE_SHARE_DB_FILE)
+  : join(__dirname, 'profile-shares.sqlite');
+const PROFILE_SHARE_TTL_MS = positiveInteger(
+  process.env.PROFILE_SHARE_TTL_DAYS,
+  365
+) * 24 * 60 * 60_000;
+const PROFILE_SHARE_MAX_ENTRIES = positiveInteger(
+  process.env.PROFILE_SHARE_MAX_ENTRIES,
+  100_000
+);
 const ADMIN_TRAFFIC_MAX_ENTRIES = positiveInteger(
   process.env.ADMIN_TRAFFIC_MAX_ENTRIES,
   DEFAULT_ADMIN_TRAFFIC_MAX_ENTRIES
@@ -108,7 +129,13 @@ const requestMetrics = createRequestMetrics({ persistence: adminData });
 const pageFeedback = createPageFeedbackStore({ persistence: adminData });
 const setupDoctorFeedback = createSetupDoctorFeedbackStore({ persistence: adminData });
 const serverLogs = createServerLogStore();
+const profileShares = createProfileShareStore({
+  file: PROFILE_SHARE_DB_FILE,
+  ttlMs: PROFILE_SHARE_TTL_MS,
+  maxEntries: PROFILE_SHARE_MAX_ENTRIES
+});
 const traktOAuthStates = createTraktOAuthStateStore({ allowedOrigins: ALLOWED_ORIGIN });
+const simklOAuthStates = createSimklOAuthStateStore({ allowedOrigins: ALLOWED_ORIGIN });
 
 for (const [method, level] of Object.entries({
   log: 'info',
@@ -263,14 +290,23 @@ Rules:
 8. When listing steps, use numbered lists for clarity.
 9. Every retrieved document identifies its WIKI PAGE route. Use that exact route for internal markdown links.`;
 
-/** Helper to generate the Trakt redirect URI dynamically, enforcing HTTPS in production. */
-function getRedirectUri(req) {
+/** Build an OAuth redirect URI dynamically, enforcing HTTPS in production. */
+function getOAuthRedirectUri(req, provider) {
   const host = req.get('host') || '';
   const isLocalhost = host.includes('localhost') || host.includes('127.0.0.1');
   const protocol = isLocalhost ? req.protocol : 'https';
-  const uri = `${protocol}://${host}/api/trakt/callback`;
-  console.log(`[Trakt API] Generated redirect URI: ${uri}`);
+  const uri = `${protocol}://${host}/api/${provider}/callback`;
+  const providerLabel = provider === 'simkl' ? 'Simkl' : 'Trakt';
+  console.log(`[${providerLabel} API] Generated redirect URI: ${uri}`);
   return uri;
+}
+
+function getRedirectUri(req) {
+  return getOAuthRedirectUri(req, 'trakt');
+}
+
+function getSimklRedirectUri(req) {
+  return getOAuthRedirectUri(req, 'simkl');
 }
 
 const DOCS_DIR = resolve(__dirname, '..', 'docs');
@@ -386,6 +422,7 @@ function buildAdminOverview(session) {
   const integrations = {
     gemini: Boolean(process.env.GEMINI_API_KEY),
     trakt: Boolean(process.env.TRAKT_CLIENT_ID && process.env.TRAKT_CLIENT_SECRET),
+    simkl: Boolean(process.env.SIMKL_CLIENT_ID && process.env.SIMKL_CLIENT_SECRET),
     tmdb: Boolean(process.env.TMDB_API_KEY)
   };
   const content = {
@@ -539,6 +576,7 @@ const metadataPerHour = rateLimit({
 
 const app = express();
 app.set('trust proxy', 1);
+app.disable('x-powered-by');
 
 app.use(requestMetrics.middleware);
 
@@ -569,6 +607,17 @@ app.use((error, req, res, next) => {
     });
   }
   return next(error);
+});
+
+app.use('/api/setup-profiles', (_req, res, next) => {
+  res.set({
+    'Cache-Control': 'no-store, max-age=0',
+    Pragma: 'no-cache',
+    'X-Content-Type-Options': 'nosniff',
+    'X-Robots-Tag': 'noindex, nofollow',
+    'Referrer-Policy': 'no-referrer'
+  });
+  next();
 });
 
 app.use('/api/admin', (_req, res, next) => {
@@ -618,6 +667,42 @@ const feedbackLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many feedback submissions. Please try again later.' },
+  keyGenerator: (req) => req.ip
+});
+
+const profileShareCreateLimiter = rateLimit({
+  windowMs: 10 * 60_000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many profile shares created. Please wait a few minutes.' },
+  keyGenerator: (req) => req.ip
+});
+
+const profileShareDailyLimiter = rateLimit({
+  windowMs: 24 * 60 * 60_000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Daily profile share limit reached. Please try again tomorrow.' },
+  keyGenerator: (req) => req.ip
+});
+
+const profileShareReadLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many share-code lookups. Please wait a moment.' },
+  keyGenerator: (req) => req.ip
+});
+
+const profileShareReadDailyLimiter = rateLimit({
+  windowMs: 24 * 60 * 60_000,
+  max: 1_000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Daily share-code lookup limit reached. Please try again tomorrow.' },
   keyGenerator: (req) => req.ip
 });
 
@@ -690,6 +775,67 @@ app.post('/api/page-feedback', feedbackLimiter, (req, res) => {
   if (!result.ok) return res.status(400).json({ error: 'Invalid feedback payload.' });
   res.status(201).json({ ok: true });
 });
+
+app.post(
+  '/api/setup-profiles',
+  profileShareCreateLimiter,
+  profileShareDailyLimiter,
+  (req, res) => {
+    try {
+      if (!req.body
+        || typeof req.body !== 'object'
+        || Array.isArray(req.body)
+        || Object.keys(req.body).length !== 1
+        || !Object.prototype.hasOwnProperty.call(req.body, 'profile')) {
+        return res.status(400).json({ error: 'A single configuration profile is required.' });
+      }
+
+      const created = profileShares.create(req.body.profile);
+      const publicPath = `/setup/${created.code}`;
+      return res
+        .location(publicPath)
+        .status(201)
+        .json({
+          code: created.code,
+          path: publicPath,
+          createdAt: new Date(created.createdAt).toISOString(),
+          expiresAt: new Date(created.expiresAt).toISOString()
+        });
+    } catch (error) {
+      if (error instanceof ProfileShareValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      console.error('Configuration profile share creation failed.');
+      return res.status(500).json({ error: 'The profile could not be shared right now.' });
+    }
+  }
+);
+
+app.get(
+  '/api/setup-profiles/:code',
+  profileShareReadLimiter,
+  profileShareReadDailyLimiter,
+  (req, res) => {
+    try {
+      const shared = profileShares.get(req.params.code);
+      if (!shared) {
+        return res.status(404).json({ error: 'This setup code is invalid or has expired.' });
+      }
+      return res.json({
+        code: String(req.params.code).trim().toUpperCase(),
+        profile: shared.profile,
+        createdAt: new Date(shared.createdAt).toISOString(),
+        expiresAt: new Date(shared.expiresAt).toISOString()
+      });
+    } catch (error) {
+      if (error instanceof ProfileShareValidationError) {
+        return res.status(404).json({ error: 'This setup code is invalid or has expired.' });
+      }
+      console.error('Configuration profile share lookup failed.');
+      return res.status(500).json({ error: 'The setup profile could not be loaded right now.' });
+    }
+  }
+);
 
 app.get('/api/status', async (req, res) => {
   try {
@@ -906,6 +1052,96 @@ app.post('/api/trakt/refresh', async (req, res) => {
     res.json(tokens);
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/simkl/login-url', async (req, res) => {
+  res.set({ 'Cache-Control': 'no-store, max-age=0', Pragma: 'no-cache' });
+  try {
+    const clientId = process.env.SIMKL_CLIENT_ID;
+    const clientSecret = process.env.SIMKL_CLIENT_SECRET;
+    if (!clientId || !clientSecret) {
+      return res.status(500).json({
+        error: 'SIMKL_CLIENT_ID or SIMKL_CLIENT_SECRET is not configured on the server.'
+      });
+    }
+
+    const requestedReturnOrigin = req.body?.return_origin || req.get('origin') || ALLOWED_ORIGIN;
+    const oauthTransaction = simklOAuthStates.issue(requestedReturnOrigin);
+    if (!oauthTransaction) {
+      return res.status(400).json({ error: 'The requested OAuth return origin is not allowed.' });
+    }
+
+    const redirectUri = getSimklRedirectUri(req);
+    const url = buildSimklAuthorizationUrl({
+      clientId,
+      redirectUri,
+      state: oauthTransaction.state
+    });
+
+    res.json({ url, state: oauthTransaction.state, client_id: clientId });
+  } catch (error) {
+    res.status(500).json({ error: error.message || 'Could not start Simkl authorization.' });
+  }
+});
+
+app.get('/api/simkl/callback', async (req, res) => {
+  res.set({ 'Cache-Control': 'no-store, max-age=0', Pragma: 'no-cache' });
+  try {
+    const clientId = process.env.SIMKL_CLIENT_ID;
+    const clientSecret = process.env.SIMKL_CLIENT_SECRET;
+    if (!clientId || !clientSecret) {
+      return res.status(500).type('text/plain').send(
+        'SIMKL_CLIENT_ID or SIMKL_CLIENT_SECRET is not configured on the server.'
+      );
+    }
+
+    const stateStr = typeof req.query.state === 'string' ? req.query.state : '';
+    if (!stateStr) {
+      return res.status(400).type('text/plain').send('Missing state parameter.');
+    }
+
+    const oauthTransaction = simklOAuthStates.consume(stateStr);
+    if (!oauthTransaction) {
+      return res.status(400).type('text/plain').send('Invalid or expired state parameter.');
+    }
+
+    if (req.query.error) {
+      const detail = String(req.query.error_description || req.query.error).slice(0, 500);
+      return res.status(400).type('text/plain').send(`Simkl authorization failed: ${detail}`);
+    }
+
+    const code = typeof req.query.code === 'string' ? req.query.code : '';
+    if (!code) {
+      return res.status(400).type('text/plain').send('Missing code parameter.');
+    }
+
+    const redirectUri = getSimklRedirectUri(req);
+    const tokens = await exchangeSimklAuthorizationCode({
+      clientId,
+      clientSecret,
+      code,
+      redirectUri
+    });
+
+    res.set({
+      'Cache-Control': 'no-store, max-age=0',
+      'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'",
+      'Content-Type': 'text/html; charset=utf-8',
+      'Referrer-Policy': 'no-referrer',
+      'X-Content-Type-Options': 'nosniff'
+    });
+    res.send(renderSimklOAuthCallback({
+      state: stateStr,
+      clientId,
+      tokens,
+      returnOrigin: oauthTransaction.returnOrigin
+    }));
+  } catch (error) {
+    console.error('[Simkl API] OAuth callback failed:', error.message || error);
+    res.status(502).type('text/plain').send(
+      error.message || 'Simkl authorization failed while exchanging the access token.'
+    );
   }
 });
 

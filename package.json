@@ -13,6 +13,8 @@
     "server:dev": "npm --prefix server run dev",
     "test:ai-markdown": "node --test docs/.vitepress/theme/components/aiMarkdown.test.ts",
     "test:badge-editor": "node --test docs/.vitepress/theme/components/badgeEditorUtils.test.ts",
+    "test:media-bridge": "node --test docs/.vitepress/theme/components/mediaBridgeCore.test.ts docs/.vitepress/theme/components/mediaBridgePlan.test.ts docs/.vitepress/theme/components/stremioWatched.test.ts",
+    "test:configuration-profiles": "node --test docs/.vitepress/theme/components/configurationProfiles.test.ts server/profile-shares.test.js",
     "test:profile-transfer": "node --test docs/.vitepress/theme/components/profileTransferMerge.test.ts"
   },
   "devDependencies": {

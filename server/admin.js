@@ -44,7 +44,7 @@ const CONTENT_STRING_FIELDS = [
   'nextCheckAt',
   'cacheExpiresAt'
 ];
-const INTEGRATION_FIELDS = ['gemini', 'trakt', 'tmdb'];
+const INTEGRATION_FIELDS = ['gemini', 'trakt', 'simkl', 'tmdb'];
 
 function clampInteger(value, fallback, minimum, maximum) {
   const parsed = Number(value);

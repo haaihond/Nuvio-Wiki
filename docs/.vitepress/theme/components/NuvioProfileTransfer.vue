@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, onActivated, onMounted, reactive, ref } from 'vue'
 import {
   addonMergeKey,
   collectionMergeKey,
@@ -8,6 +8,16 @@ import {
   mergeStagedRecords,
   pluginMergeKey
 } from './profileTransferMerge'
+import {
+  ADDON_CATALOG,
+  CONFIGURATION_PROFILE_DRAFT_STORAGE_KEY,
+  CREDENTIAL_CATALOG,
+  PROFILE_TRANSFER_STORAGE_KEY,
+  configurationProfileFromTransferBackup,
+  normalizeConfigurationProfile,
+  serializeConfigurationProfile,
+  type ConfigurationProfile
+} from './configurationProfiles'
 
 type TransferMode = 'export' | 'import'
 type RestoreStrategy = 'merge' | 'replace'
@@ -193,6 +203,8 @@ const importStatus = ref('')
 const importError = ref('')
 const importResults = ref<ImportResult[]>([])
 const importProgress = reactive({ current: 0, total: 0 })
+const receivedConfigurationProfile = ref<ConfigurationProfile | null>(null)
+const configurationProfileError = ref('')
 
 const isConnected = computed(() => Boolean(session.value?.access_token))
 const exportProfile = computed(() => profiles.value.find(
@@ -235,6 +247,27 @@ const emptyReplaceDefinitions = computed(() => selectedImportDefinitions.value.f
     && Array.isArray(value)
     && value.length === 0
 }))
+const receivedAddonLabels = computed(() => (
+  receivedConfigurationProfile.value?.addons.map(addon => catalogLabel(ADDON_CATALOG, addon.id)) ?? []
+))
+const receivedCredentialLabels = computed(() => (
+  receivedConfigurationProfile.value?.credentials.map(id => catalogLabel(CREDENTIAL_CATALOG, id)) ?? []
+))
+
+function loadReceivedConfigurationProfile() {
+  try {
+    const serialized = window.sessionStorage.getItem(PROFILE_TRANSFER_STORAGE_KEY)
+    if (!serialized) return
+    receivedConfigurationProfile.value = normalizeConfigurationProfile(JSON.parse(serialized))
+    configurationProfileError.value = ''
+    window.sessionStorage.removeItem(PROFILE_TRANSFER_STORAGE_KEY)
+  } catch {
+    configurationProfileError.value = 'The shared setup plan could not be opened. No profile data was imported.'
+  }
+}
+
+onMounted(loadReceivedConfigurationProfile)
+onActivated(loadReceivedConfigurationProfile)
 
 function isRecord(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -242,6 +275,47 @@ function isRecord(value: unknown): value is Record<string, any> {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error)
+}
+
+function catalogLabel(catalog: unknown, id: string) {
+  const entries = Array.isArray(catalog)
+    ? catalog
+    : Object.values(isRecord(catalog) ? catalog : {})
+  const entry = entries.find(candidate => isRecord(candidate)
+    && (candidate.id === id || candidate.serviceId === id))
+  if (isRecord(entry)) {
+    const label = entry.label ?? entry.name
+    if (typeof label === 'string') return label
+  }
+  return id.replace(/-/g, ' ').replace(/\b\w/g, character => character.toUpperCase())
+}
+
+function targetDeviceLabel(target: string) {
+  return target.replace(/-/g, ' ').replace(/\b\w/g, character => character.toUpperCase())
+}
+
+function storeConfigurationDraft(profile: ConfigurationProfile) {
+  window.sessionStorage.setItem(
+    CONFIGURATION_PROFILE_DRAFT_STORAGE_KEY,
+    serializeConfigurationProfile(profile)
+  )
+}
+
+function editReceivedConfigurationProfile() {
+  if (!receivedConfigurationProfile.value) return
+  storeConfigurationDraft(receivedConfigurationProfile.value)
+  window.location.hash = 'configuration-profiles'
+}
+
+function createSafeShareDraft() {
+  if (!lastCreatedBackup.value) return
+  try {
+    const draft = configurationProfileFromTransferBackup(lastCreatedBackup.value)
+    storeConfigurationDraft(draft)
+    window.location.hash = 'configuration-profiles'
+  } catch (error) {
+    exportError.value = `A safe setup draft could not be created. ${errorMessage(error)}`
+  }
 }
 
 function behaviorLabel(behavior: ImportBehavior) {
@@ -1295,6 +1369,56 @@ async function runImport() {
 
 <template>
   <div class="profile-transfer">
+    <p v-if="configurationProfileError" class="error-panel" role="alert">
+      {{ configurationProfileError }}
+    </p>
+
+    <section
+      v-if="receivedConfigurationProfile"
+      class="shared-configuration-card"
+      aria-labelledby="shared-configuration-heading"
+    >
+      <div class="shared-configuration-copy">
+        <span class="eyebrow">Shared setup plan</span>
+        <h3 id="shared-configuration-heading">{{ receivedConfigurationProfile.name }}</h3>
+        <p>
+          This safe plan is for {{ targetDeviceLabel(receivedConfigurationProfile.targetDevice) }}.
+          It contains preferences and placeholders only; Profile Transfer will not invent or push undocumented app-setting keys.
+        </p>
+      </div>
+
+      <div class="shared-configuration-summary">
+        <div>
+          <strong>Add-on order</strong>
+          <ol v-if="receivedAddonLabels.length">
+            <li v-for="label in receivedAddonLabels" :key="label">{{ label }}</li>
+          </ol>
+          <span v-else>No add-ons selected</span>
+        </div>
+        <div>
+          <strong>Preferences</strong>
+          <span>{{ receivedConfigurationProfile.quality.maxResolution }} maximum</span>
+          <span>{{ receivedConfigurationProfile.languages.primarySubtitle }} subtitles</span>
+          <span>{{ targetDeviceLabel(receivedConfigurationProfile.player.engine) }} player</span>
+        </div>
+        <div v-if="receivedCredentialLabels.length">
+          <strong>Enter on your device</strong>
+          <ul>
+            <li v-for="label in receivedCredentialLabels" :key="label">Your own {{ label }}</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="shared-configuration-actions">
+        <button class="secondary-button" type="button" @click="editReceivedConfigurationProfile">
+          Customize this plan
+        </button>
+        <button class="text-button" type="button" @click="receivedConfigurationProfile = null">
+          Dismiss
+        </button>
+      </div>
+    </section>
+
     <div class="transfer-workspace">
       <div class="account-rail">
         <section class="connection-card" aria-labelledby="nuvio-connection-heading">
@@ -1468,6 +1592,16 @@ async function runImport() {
           <span>{{ exportStatus }}</span>
         </div>
         <p v-else-if="exportStatus" class="status-panel" aria-live="polite">{{ exportStatus }}</p>
+
+        <div v-if="lastCreatedBackup" class="recent-backup-box safe-share-box">
+          <div>
+            <strong>Share the setup, not this private backup</strong>
+            <span>Start a public-safe draft from recognized add-on names and order. URLs, settings blobs, account data, and credentials stay out.</span>
+          </div>
+          <button class="secondary-button" type="button" :disabled="exportBusy" @click="createSafeShareDraft">
+            Create safe share profile
+          </button>
+        </div>
 
         <div class="panel-footer">
           <span>{{ exportSelection.size === CATEGORY_DEFINITIONS.length ? 'Everything selected' : `${exportSelection.size} of ${CATEGORY_DEFINITIONS.length} selected` }}</span>
@@ -1721,6 +1855,89 @@ async function runImport() {
   border-radius: 12px;
   background: var(--vp-c-bg);
   color: var(--vp-c-text-1);
+}
+
+.shared-configuration-card {
+  display: grid;
+  gap: 18px;
+  padding: 22px 26px;
+  border-bottom: 1px solid color-mix(in srgb, var(--vp-c-brand-1) 32%, var(--vp-c-divider));
+  background: color-mix(in srgb, var(--vp-c-brand-soft) 52%, var(--vp-c-bg));
+}
+
+.shared-configuration-copy h3 {
+  margin: 4px 0 6px !important;
+  border: 0 !important;
+  font-size: 20px;
+}
+
+.shared-configuration-copy p {
+  max-width: 780px;
+  margin: 0 !important;
+  color: var(--vp-c-text-2);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.shared-configuration-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.shared-configuration-summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 10px;
+  background: var(--vp-c-bg);
+  font-size: 12px;
+}
+
+.shared-configuration-summary strong {
+  font-size: 12px;
+}
+
+.shared-configuration-summary span,
+.shared-configuration-summary li {
+  color: var(--vp-c-text-2);
+  line-height: 1.45;
+}
+
+.shared-configuration-summary ol,
+.shared-configuration-summary ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.shared-configuration-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.text-button {
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--vp-c-text-2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.text-button:hover {
+  color: var(--vp-c-text-1);
+}
+
+.text-button:focus-visible {
+  outline: 2px solid var(--vp-c-brand-1);
+  outline-offset: 2px;
+  border-radius: 6px;
 }
 
 .transfer-workspace {
@@ -2711,6 +2928,24 @@ select:disabled {
 @container (max-width: 620px) {
   .profile-transfer {
     border-radius: 10px;
+  }
+
+  .shared-configuration-card {
+    padding: 18px;
+  }
+
+  .shared-configuration-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .shared-configuration-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .shared-configuration-actions button {
+    width: 100%;
+    min-height: 44px;
   }
 
   .account-rail {

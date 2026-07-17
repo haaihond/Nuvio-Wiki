@@ -24,6 +24,7 @@ FILE_SEARCH_DATA_FILE=/var/lib/nuvio-ai/file-search.json
 CACHE_DATA_FILE=/var/lib/nuvio-ai/cache.json
 ADMIN_DATA_DB_FILE=/var/lib/nuvio-ai/admin-data.sqlite
 METADATA_CACHE_DB_FILE=/var/lib/nuvio-ai/metadata-cache.sqlite
+PROFILE_SHARE_DB_FILE=/var/lib/nuvio-ai/profile-shares.sqlite
 ```
 
 Metadata enrichment is sent by the browser in concurrent 400-item batches. The
@@ -32,6 +33,51 @@ server accepts at most 1,000 items per request, applies high abuse-only limits
 TMDB's bulk-request ceiling. Results are stored in a WAL-mode SQLite cache capped
 at 500,000 keys with expiry and short-lived negative caching. All of these
 operational limits can be tuned with the variables documented in `.env.example`.
+
+## Configuration profile share codes
+
+Configuration profiles are immutable, non-secret setup plans stored in a
+separate SQLite database. Public payloads use a strict allowlist of curated
+add-on IDs and documented preferences. Raw Profile Transfer exports, configured
+manifest URLs, tokens, API keys, passwords, and session data are never accepted.
+
+```env
+PROFILE_SHARE_DB_FILE=/var/lib/nuvio-ai/profile-shares.sqlite
+PROFILE_SHARE_TTL_DAYS=365
+PROFILE_SHARE_MAX_ENTRIES=100000
+```
+
+`POST /api/setup-profiles` creates an expiring short code and
+`GET /api/setup-profiles/:code` resolves it. Creation and lookup are separately
+rate-limited, responses are not cached, and recipients enter all required
+credentials on their own device.
+
+## Sync Bridge OAuth
+
+Trakt and Simkl use confidential OAuth clients. Keep both client secrets only in
+the server environment:
+
+```env
+TRAKT_CLIENT_ID=your-trakt-client-id
+TRAKT_CLIENT_SECRET=your-trakt-client-secret
+SIMKL_CLIENT_ID=your-simkl-client-id
+SIMKL_CLIENT_SECRET=your-simkl-client-secret
+ALLOWED_ORIGIN=https://nuvio.wiki
+```
+
+Create the Simkl app in [Simkl developer settings](https://simkl.com/settings/developer/)
+and register the callback URI exactly as served, including scheme and path:
+
+```text
+https://nuvio.wiki/api/simkl/callback
+```
+
+Local development should register `http://localhost:3001/api/simkl/callback`
+when the Express server is reached directly on its default port. OAuth state is
+opaque, single-use, allowlisted to `ALLOWED_ORIGIN`, and held only in memory.
+Restarting the server invalidates pending popup authorizations. Simkl access
+tokens are long-lived and Simkl does not issue a refresh token; reconnect after
+revocation or a `401` response.
 
 ## Roll back to explicit context caching
 
@@ -87,6 +133,6 @@ proxy location described below.
 
 ## Production Deployment (Nginx Reverse Proxy)
 
-When running the wiki website and AI server in production behind Nginx, you must route requests starting with `/api/ai`, `/api/trakt`, and `/api/admin`, plus `/api/status`, `/api/setup-doctor/feedback`, and `/api/page-feedback`, to the Express backend (default port `3001`).
+When running the wiki website and AI server in production behind Nginx, you must route requests starting with `/api/ai`, `/api/trakt`, `/api/simkl`, `/api/setup-profiles`, and `/api/admin`, plus `/api/status`, `/api/setup-doctor/feedback`, and `/api/page-feedback`, to the Express backend (default port `3001`). Clean `/setup/CODE` URLs must also redirect to the built `/setup/` receiver with the code preserved in its query string.
 
-An example Nginx location block configuration is provided in [wiki-api.location.conf](../deploy/nginx/wiki-api.location.conf). Include these configuration blocks inside your site's HTTPS server block to enable the AI assistant, Trakt bridge, live status page, and anonymous feedback.
+An example Nginx location block configuration is provided in [wiki-api.location.conf](../deploy/nginx/wiki-api.location.conf). Include these configuration blocks inside your site's HTTPS server block to enable the AI assistant, Sync Bridge OAuth, live status page, and anonymous feedback.

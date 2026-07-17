@@ -22,5 +22,6 @@ export default {
     app.component('NuvioTraktBridge', defineAsyncComponent(() => import('./components/NuvioTraktBridge.vue')))
     app.component('NuvioToolsContainer', defineAsyncComponent(() => import('./components/NuvioToolsContainer.vue')))
     app.component('NuvioProfileTransfer', defineAsyncComponent(() => import('./components/NuvioProfileTransfer.vue')))
+    app.component('NuvioConfigurationProfiles', defineAsyncComponent(() => import('./components/NuvioConfigurationProfiles.vue')))
   }
 }

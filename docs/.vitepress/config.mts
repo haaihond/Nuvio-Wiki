@@ -49,6 +49,7 @@ function buildNav(locale: WikiLocale): DefaultTheme.NavItem[] {
       text: 'Resources',
       items: [
         { text: 'Tools', link: siteRoutes.tools },
+        { text: 'Configuration profiles', link: siteRoutes.configurationProfiles },
         { text: 'Service status', link: siteRoutes.status },
         { text: 'Official links', link: siteRoutes.officialLinks }
       ]
@@ -108,7 +109,7 @@ function buildSidebar(locale: WikiLocale): DefaultTheme.SidebarItem[] {
     .filter(k => k !== locale.key)
   const excludeByGlobPattern = [
     ...otherLocaleKeys.map(k => `${k}/**`),
-    ...(isRoot ? ['tools/**'] : [])
+    ...(isRoot ? ['tools/**', 'setup/**'] : [])
   ]
 
   const sidebar = generateSidebar({
@@ -334,6 +335,10 @@ export default defineConfig({
           changeOrigin: true
         },
         '/api/setup-doctor': {
+          target: 'http://localhost:3001',
+          changeOrigin: true
+        },
+        '/api/setup-profiles': {
           target: 'http://localhost:3001',
           changeOrigin: true
         },

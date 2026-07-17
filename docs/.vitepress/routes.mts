@@ -23,6 +23,7 @@ export const siteRoutes = {
   faq: '/faq',
   officialLinks: '/official-links',
   tools: '/tools',
+  configurationProfiles: '/setup/',
   setupDoctor: '/tools/setup-doctor',
   status: '/status'
 } as const

@@ -1,0 +1,492 @@
+import {
+  canonicalEpisodeKey,
+  canonicalMediaKey,
+  dedupeBundle,
+  episodeAliasKeys,
+  mediaAliasKeys,
+  normalizeTitle,
+  type BridgeScope,
+  type CanonicalBundle,
+  type HistoryRecord,
+  type LibraryRecord,
+  type MappingConfidence,
+  type MappingOutcome,
+  type MediaIds,
+  type MediaRef,
+  type ProgressRecord,
+  type SyncScopes
+} from './mediaBridgeCore.ts'
+
+export type PreviewOutcome = 'add' | 'update' | 'already-present' | 'unresolved' | 'ambiguous'
+
+export interface ProviderMappingIssue {
+  scope: BridgeScope
+  sourceMedia: MediaRef
+  mapping: MappingOutcome
+}
+
+export interface PreviewRow {
+  readonly id: string
+  readonly scope: BridgeScope
+  readonly mediaKind: MediaRef['kind']
+  readonly title: string
+  readonly outcome: PreviewOutcome
+  readonly outcomeLabel: string
+  readonly sourceKey: string | null
+  readonly targetKey: string | null
+  readonly remapped: boolean
+  readonly mappingConfidence: MappingConfidence | null
+  readonly detail: string
+}
+
+export interface PreviewStats {
+  source: number
+  add: number
+  update: number
+  alreadyPresent: number
+  remapped: number
+  unresolved: number
+  ambiguous: number
+  skipped: number
+}
+
+export interface PlannedTransferBundle {
+  readonly history: readonly HistoryRecord[]
+  readonly progress: readonly ProgressRecord[]
+  readonly library: readonly LibraryRecord[]
+}
+
+export interface MediaBridgePreviewPlan {
+  readonly transfer: PlannedTransferBundle
+  readonly rows: readonly PreviewRow[]
+  readonly stats: Readonly<PreviewStats>
+}
+
+export interface MediaBridgePlanInput {
+  source: CanonicalBundle
+  destination: CanonicalBundle
+  scopes: SyncScopes
+  mappingIssues?: readonly ProviderMappingIssue[]
+}
+
+type ScopedRecord = HistoryRecord | ProgressRecord | LibraryRecord
+
+interface PendingRow extends Omit<PreviewRow, 'id'> {
+  stableKey: string
+  sequence: number
+}
+
+const SCOPE_ORDER: Record<BridgeScope, number> = {
+  history: 0,
+  progress: 1,
+  library: 2
+}
+
+function canonicalRecordKey(media: MediaRef): string | null {
+  return canonicalEpisodeKey(media) || canonicalMediaKey(media)
+}
+
+function recordAliasKeys(media: MediaRef): string[] {
+  const episodeAliases = episodeAliasKeys(media)
+  return episodeAliases.length ? episodeAliases : mediaAliasKeys(media)
+}
+
+function mediaLocator(media: MediaRef): string {
+  return canonicalRecordKey(media) || [
+    'unresolved',
+    media.kind,
+    normalizeTitle(media.title),
+    Number.isInteger(media.year) ? media.year : '',
+    Number.isInteger(media.season) ? media.season : '',
+    Number.isInteger(media.episode) ? media.episode : '',
+    Number.isInteger(media.absoluteEpisode) ? media.absoluteEpisode : '',
+    normalizeTitle(media.episodeTitle),
+    String(media.videoId || '').trim()
+  ].join(':')
+}
+
+function mappingIssueKey(scope: BridgeScope, media: MediaRef): string {
+  return `${scope}:${mediaLocator(media)}`
+}
+
+function mappingIssueRank(mapping: MappingOutcome): number {
+  if (mapping.status === 'unresolved') return 3
+  if (mapping.status === 'ambiguous') return 2
+  return 1
+}
+
+function buildMappingIssueIndex(issues: readonly ProviderMappingIssue[]): Map<string, ProviderMappingIssue> {
+  const index = new Map<string, ProviderMappingIssue>()
+  for (const issue of issues) {
+    const key = mappingIssueKey(issue.scope, issue.sourceMedia)
+    const existing = index.get(key)
+    if (!existing || mappingIssueRank(issue.mapping) > mappingIssueRank(existing.mapping)) {
+      index.set(key, issue)
+    }
+  }
+  return index
+}
+
+function cloneMediaIds(ids: MediaIds): MediaIds {
+  const cloned: MediaIds = { ...ids }
+  if (ids.external) cloned.external = { ...ids.external }
+  return cloned
+}
+
+function cloneMediaWithMapping(media: MediaRef, mapping: MappingOutcome): MediaRef {
+  if (mapping.status !== 'mapped' || media.kind !== 'series') {
+    return { ...media, ids: cloneMediaIds(media.ids) }
+  }
+  return {
+    ...media,
+    ids: cloneMediaIds(media.ids),
+    season: mapping.target.season,
+    episode: mapping.target.episode,
+    absoluteEpisode: mapping.target.absoluteEpisode ?? media.absoluteEpisode,
+    episodeTitle: mapping.target.title || media.episodeTitle,
+    videoId: mapping.target.videoId || media.videoId
+  }
+}
+
+function cloneRecordWithMedia(
+  scope: BridgeScope,
+  record: ScopedRecord,
+  media: MediaRef
+): ScopedRecord {
+  if (scope === 'history') {
+    const history = record as HistoryRecord
+    return {
+      ...history,
+      media,
+      source: history.source ? { ...history.source } : undefined
+    }
+  }
+  if (scope === 'progress') {
+    const progress = record as ProgressRecord
+    return {
+      ...progress,
+      media,
+      source: progress.source ? { ...progress.source } : undefined
+    }
+  }
+  const library = record as LibraryRecord
+  return {
+    ...library,
+    media,
+    source: library.source ? { ...library.source } : undefined,
+    lists: library.lists.map(list => ({ ...list }))
+  }
+}
+
+function displayTitle(media: MediaRef): string {
+  const base = String(media.title || '').trim()
+    || String(media.ids.imdb || media.ids.tmdb || media.ids.trakt || media.ids.simkl || media.ids.stremio || '')
+    || `Untitled ${media.kind}`
+  if (media.kind !== 'series') return base
+  if (Number.isInteger(media.season) && Number.isInteger(media.episode)) {
+    return `${base} · S${media.season}E${media.episode}`
+  }
+  if (Number.isInteger(media.absoluteEpisode)) {
+    return `${base} · Episode ${media.absoluteEpisode}`
+  }
+  return base
+}
+
+function outcomeLabel(outcome: PreviewOutcome, remapped: boolean): string {
+  const suffix = remapped ? ' · remapped' : ''
+  if (outcome === 'add') return `Add to destination${suffix}`
+  if (outcome === 'update') return `Update destination${suffix}`
+  if (outcome === 'already-present') return `Already present${suffix}`
+  if (outcome === 'ambiguous') return 'Skipped · ambiguous mapping'
+  return 'Skipped · unresolved mapping'
+}
+
+const GENERIC_LIST_NAMES: Record<LibraryRecord['lists'][number]['kind'], ReadonlySet<string>> = {
+  watchlist: new Set(['watchlist', 'watch list', 'my watchlist', 'plan to watch']),
+  collection: new Set(['collection', 'my collection']),
+  library: new Set(['library', 'my library']),
+  favorites: new Set(['favorites', 'favourites', 'my favorites', 'my favourites']),
+  other: new Set()
+}
+
+function semanticListKey(
+  list: LibraryRecord['lists'][number],
+  collapseGenericMembership = false
+): string {
+  const name = normalizeTitle(list.name)
+  const generic = list.kind !== 'other' && (!name || GENERIC_LIST_NAMES[list.kind].has(name))
+  if (collapseGenericMembership && generic) return 'generic-membership'
+  if (name && !GENERIC_LIST_NAMES[list.kind].has(name)) {
+    return `${list.kind}:name:${name}`
+  }
+  const listId = String(list.listId || '').trim().toLocaleLowerCase('en-US')
+  if (list.kind === 'other' && listId) return `${list.kind}:id:${listId}`
+  return list.kind
+}
+
+function listIdentity(record: LibraryRecord, collapseGenericMembership = false): string[] {
+  return [...new Set(record.lists.map(list => semanticListKey(list, collapseGenericMembership)))].sort()
+}
+
+function hasOnlyTraktProvenance(record: LibraryRecord): boolean {
+  return record.lists.length > 0 && record.lists.every(list => list.service === 'trakt')
+}
+
+function hasDifferentLists(source: LibraryRecord, destination: LibraryRecord): boolean {
+  // Trakt is the only bridge provider with two independently writable native
+  // memberships. Other providers expose one generic saved-title destination,
+  // so watchlist/collection/library provenance must converge after a refresh.
+  const collapseGenericMembership = !(
+    hasOnlyTraktProvenance(source) && hasOnlyTraktProvenance(destination)
+  )
+  const sourceLists = listIdentity(source, collapseGenericMembership)
+  const destinationLists = new Set(listIdentity(destination, collapseGenericMembership))
+  return sourceLists.some(list => !destinationLists.has(list))
+}
+
+function progressPercentage(record: ProgressRecord): number | null {
+  const duration = Number(record.durationMs)
+  const position = Number(record.positionMs)
+  if (Number.isFinite(position) && position >= 0 && Number.isFinite(duration) && duration > 0) {
+    return (position / duration) * 100
+  }
+
+  const percentage = Number(record.percentage)
+  return Number.isFinite(percentage) && percentage >= 0 && percentage <= 100
+    ? percentage
+    : null
+}
+
+function progressEquivalent(source: ProgressRecord, destination: ProgressRecord): boolean {
+  const sourceDuration = Number(source.durationMs)
+  const destinationDuration = Number(destination.durationMs)
+  const sourcePosition = Number(source.positionMs)
+  const destinationPosition = Number(destination.positionMs)
+  const durationsValid = sourceDuration > 0 && destinationDuration > 0
+
+  const sourcePercentage = progressPercentage(source)
+  const destinationPercentage = progressPercentage(destination)
+  if (
+    sourcePercentage !== null
+    && destinationPercentage !== null
+    && Math.abs(sourcePercentage - destinationPercentage) <= 1
+  ) return true
+
+  if (!durationsValid) return false
+
+  const durationDifference = Math.abs(sourceDuration - destinationDuration)
+  const durationScale = Math.max(sourceDuration, destinationDuration, 1)
+  const durationNear = durationDifference <= 5_000 || (durationDifference / durationScale) <= 0.01
+  return durationNear && Math.abs(sourcePosition - destinationPosition) <= 5_000
+}
+
+function classifyRecord(
+  scope: BridgeScope,
+  source: ScopedRecord,
+  destination: ScopedRecord | undefined
+): Extract<PreviewOutcome, 'add' | 'update' | 'already-present'> {
+  if (!destination) return 'add'
+
+  if (scope === 'history') {
+    const sourceHistory = source as HistoryRecord
+    const destinationHistory = destination as HistoryRecord
+    // The bridge intentionally collapses replay events to the latest watched
+    // state. Some destinations (notably Trakt) create a fresh history event on
+    // every write, so comparing provider play counts here would make an
+    // otherwise-idempotent route add another play on every run.
+    return sourceHistory.watchedAt > destinationHistory.watchedAt
+      ? 'update'
+      : 'already-present'
+  }
+
+  if (scope === 'progress') {
+    const sourceProgress = source as ProgressRecord
+    const destinationProgress = destination as ProgressRecord
+    if (sourceProgress.updatedAt < destinationProgress.updatedAt) return 'already-present'
+    return progressEquivalent(sourceProgress, destinationProgress) ? 'already-present' : 'update'
+  }
+
+  const sourceLibrary = source as LibraryRecord
+  const destinationLibrary = destination as LibraryRecord
+  return sourceLibrary.addedAt > destinationLibrary.addedAt
+    || hasDifferentLists(sourceLibrary, destinationLibrary)
+    ? 'update'
+    : 'already-present'
+}
+
+function recordsForScope(bundle: CanonicalBundle, scope: BridgeScope): ScopedRecord[] {
+  if (scope === 'history') return bundle.history
+  if (scope === 'progress') return bundle.progress
+  return bundle.library
+}
+
+function destinationIndexes(bundle: CanonicalBundle): Record<BridgeScope, Map<string, ScopedRecord>> {
+  const result = {
+    history: new Map<string, ScopedRecord>(),
+    progress: new Map<string, ScopedRecord>(),
+    library: new Map<string, ScopedRecord>()
+  }
+  for (const scope of Object.keys(result) as BridgeScope[]) {
+    for (const record of recordsForScope(bundle, scope)) {
+      for (const key of recordAliasKeys(record.media)) {
+        // dedupeBundle orders latest records first; retain that winner if two
+        // records expose the same alias through different primary IDs.
+        if (!result[scope].has(key)) result[scope].set(key, record)
+      }
+    }
+  }
+  return result
+}
+
+function pushTransferRecord(bundle: CanonicalBundle, scope: BridgeScope, record: ScopedRecord): void {
+  if (scope === 'history') bundle.history.push(record as HistoryRecord)
+  else if (scope === 'progress') bundle.progress.push(record as ProgressRecord)
+  else bundle.library.push(record as LibraryRecord)
+}
+
+function mappingChanged(source: MediaRef, target: MediaRef): boolean {
+  return source.season !== target.season
+    || source.episode !== target.episode
+    || source.absoluteEpisode !== target.absoluteEpisode
+    || source.videoId !== target.videoId
+    || normalizeTitle(source.episodeTitle) !== normalizeTitle(target.episodeTitle)
+}
+
+function stableRows(rows: PendingRow[]): PreviewRow[] {
+  rows.sort((left, right) => (
+    SCOPE_ORDER[left.scope] - SCOPE_ORDER[right.scope]
+    || left.stableKey.localeCompare(right.stableKey)
+    || left.outcome.localeCompare(right.outcome)
+    || left.sequence - right.sequence
+  ))
+
+  const occurrences = new Map<string, number>()
+  return rows.map(row => {
+    const baseId = `${row.scope}:${row.stableKey}`
+    const occurrence = occurrences.get(baseId) || 0
+    occurrences.set(baseId, occurrence + 1)
+    const { stableKey: _stableKey, sequence: _sequence, ...previewRow } = row
+    return {
+      ...previewRow,
+      id: occurrence ? `${baseId}:${occurrence + 1}` : baseId
+    }
+  })
+}
+
+function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
+  if (!value || typeof value !== 'object') return value
+  const object = value as object
+  if (seen.has(object)) return value
+  seen.add(object)
+  for (const child of Object.values(object)) deepFreeze(child, seen)
+  return Object.freeze(value)
+}
+
+export function planMediaBridgePreview(input: MediaBridgePlanInput): MediaBridgePreviewPlan {
+  const source = dedupeBundle(input.source)
+  const destination = dedupeBundle(input.destination)
+  const destinationByScope = destinationIndexes(destination)
+  const mappingIssues = buildMappingIssueIndex(input.mappingIssues || [])
+  const transfer: CanonicalBundle = { history: [], progress: [], library: [] }
+  const rows: PendingRow[] = []
+  const stats: PreviewStats = {
+    source: 0,
+    add: 0,
+    update: 0,
+    alreadyPresent: 0,
+    remapped: 0,
+    unresolved: 0,
+    ambiguous: 0,
+    skipped: 0
+  }
+  let sequence = 0
+
+  for (const scope of ['history', 'progress', 'library'] as const) {
+    if (!input.scopes[scope]) continue
+
+    for (const sourceRecord of recordsForScope(source, scope)) {
+      stats.source++
+      const originalMedia = sourceRecord.media
+      const sourceKey = canonicalRecordKey(originalMedia)
+      const issue = mappingIssues.get(mappingIssueKey(scope, originalMedia))
+
+      if (!sourceKey || issue?.mapping.status === 'unresolved' || issue?.mapping.status === 'ambiguous') {
+        const outcome: PreviewOutcome = issue?.mapping.status === 'ambiguous' ? 'ambiguous' : 'unresolved'
+        stats[outcome]++
+        stats.skipped++
+        const detail = issue?.mapping.reason || 'No canonical content or episode key is available.'
+        rows.push({
+          stableKey: mediaLocator(originalMedia),
+          sequence: sequence++,
+          scope,
+          mediaKind: originalMedia.kind,
+          title: displayTitle(originalMedia),
+          outcome,
+          outcomeLabel: outcomeLabel(outcome, false),
+          sourceKey,
+          targetKey: null,
+          remapped: false,
+          mappingConfidence: issue?.mapping.confidence || 'none',
+          detail
+        })
+        continue
+      }
+
+      const mappedMedia = issue
+        ? cloneMediaWithMapping(originalMedia, issue.mapping)
+        : { ...originalMedia, ids: cloneMediaIds(originalMedia.ids) }
+      const remapped = Boolean(issue?.mapping.status === 'mapped' && mappingChanged(originalMedia, mappedMedia))
+      const targetKey = canonicalRecordKey(mappedMedia)
+
+      if (!targetKey) {
+        stats.unresolved++
+        stats.skipped++
+        rows.push({
+          stableKey: mediaLocator(originalMedia),
+          sequence: sequence++,
+          scope,
+          mediaKind: originalMedia.kind,
+          title: displayTitle(originalMedia),
+          outcome: 'unresolved',
+          outcomeLabel: outcomeLabel('unresolved', false),
+          sourceKey,
+          targetKey: null,
+          remapped: false,
+          mappingConfidence: issue?.mapping.confidence || 'none',
+          detail: issue?.mapping.reason || 'The mapped record has no canonical destination key.'
+        })
+        continue
+      }
+
+      const plannedRecord = cloneRecordWithMedia(scope, sourceRecord, mappedMedia)
+      const outcome = classifyRecord(scope, plannedRecord, destinationByScope[scope].get(targetKey))
+      stats[outcome === 'already-present' ? 'alreadyPresent' : outcome]++
+      if (remapped) stats.remapped++
+      if (outcome === 'add' || outcome === 'update') {
+        pushTransferRecord(transfer, scope, plannedRecord)
+      }
+
+      rows.push({
+        stableKey: targetKey,
+        sequence: sequence++,
+        scope,
+        mediaKind: mappedMedia.kind,
+        title: displayTitle(mappedMedia),
+        outcome,
+        outcomeLabel: outcomeLabel(outcome, remapped),
+        sourceKey,
+        targetKey,
+        remapped,
+        mappingConfidence: issue?.mapping.confidence || null,
+        detail: issue?.mapping.reason || outcomeLabel(outcome, false)
+      })
+    }
+  }
+
+  const result: MediaBridgePreviewPlan = {
+    transfer: dedupeBundle(transfer),
+    rows: stableRows(rows),
+    stats
+  }
+  return deepFreeze(result)
+}

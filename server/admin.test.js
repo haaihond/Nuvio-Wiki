@@ -523,7 +523,7 @@ test('builds a whitelisted runtime, system, disk, content, traffic, and security
       knowledgeLoaded: true,
       fileCount: 42,
       contentChars: 123_456,
-      integrations: { gemini: true, trakt: false, tmdb: true, private: 'secret' },
+      integrations: { gemini: true, trakt: false, simkl: true, tmdb: true, private: 'secret' },
       apiKey: 'must-not-leak',
       fileSearchStoreName: 'stores/private-name',
       contentHash: 'private-hash'
@@ -549,7 +549,12 @@ test('builds a whitelisted runtime, system, disk, content, traffic, and security
   assert.equal(snapshot.content.pageCount, 42);
   assert.equal(snapshot.content.totalBytes, 123_456);
   assert.equal(snapshot.content.lastUpdatedAt, '2026-07-11T14:59:00.000Z');
-  assert.deepEqual(snapshot.content.integrations, { gemini: true, trakt: false, tmdb: true });
+  assert.deepEqual(snapshot.content.integrations, {
+    gemini: true,
+    trakt: false,
+    simkl: true,
+    tmdb: true
+  });
   assert.equal(snapshot.traffic.summary.requests, 7);
   assert.equal(snapshot.security.activeSessions, 1);
 
