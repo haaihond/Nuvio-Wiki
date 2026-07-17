@@ -2,6 +2,9 @@
 
 Nuvio on iOS is available on the app store or through **Sideloading** (AltStore/Sideloadly).
 
+>[!WARNING]
+>Apple has removed Nuvio from the App Store and Testlight. The only current method to get Nuvio on iOS is through sideloading.
+
 >[!NOTE]
 >The app store version lacks some features of the sideloaded versions (e.g. plugins).
 
@@ -39,7 +42,6 @@ Sideloading Nuvio offers a few extra features. To get started choose one of the 
     
 8. Enable Developer Mode: Required on iOS 16 and newer.
     - If you haven't already done this for a previous app, go to Settings > Privacy & Security > Developer Mode. Toggle it on and let your phone restart.
-
 
 **Altstore Method**
 1. Set up your computer
