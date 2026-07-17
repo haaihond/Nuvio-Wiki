@@ -1,7 +1,9 @@
 import {
   createEmptyBundle,
   dedupeBundle,
+  parseStremioVideoId,
   remapEpisode,
+  type BridgeScope,
   type BridgeSlot,
   type CanonicalBundle,
   type ConnectedEndpoint,
@@ -26,6 +28,7 @@ const STREMIO_API = 'https://api.strem.io/api'
 const CINEMETA_API = 'https://v3-cinemeta.strem.io'
 const NUVIO_API = 'https://api.nuvio.tv'
 const TRAKT_MAX_RESUME_PROGRESS = 79
+const SIMKL_PROGRESS_IMPORT_TIMEOUT_MS = 30_000
 
 const SIMKL_EXTERNAL_ID_NAMESPACES = [
   'mal',
@@ -151,6 +154,17 @@ export interface PushResult {
   written: PushCounts
   issues: BridgeIssue[]
   skipped?: Partial<PushCounts>
+  /** Scopes whose write responses account for every submitted record. */
+  confirmedScopes?: BridgeScope[]
+}
+
+export interface MediaBridgeVerificationCheckpoint {
+  simklActivity?: string
+}
+
+export interface VerificationPullOptions extends PullOptions {
+  baseline: CanonicalBundle
+  checkpoint: MediaBridgeVerificationCheckpoint
 }
 
 export interface PullOptions {
@@ -180,8 +194,22 @@ function logTo(log: BridgeLog | undefined, message: string) {
   log?.(message)
 }
 
-function sleep(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms))
+function sleep(ms: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason || new DOMException('The operation was aborted.', 'AbortError'))
+      return
+    }
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    const onAbort = () => {
+      clearTimeout(timeout)
+      reject(signal?.reason || new DOMException('The operation was aborted.', 'AbortError'))
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 function chunk<T>(items: readonly T[], size: number): T[][] {
@@ -619,7 +647,10 @@ async function simklRequest(
     }
   }
   const isWrite = String(options.method || 'GET').toUpperCase() !== 'GET'
-  const minimumWriteGapMs = path.startsWith('/scrobble/') ? 20_050 : 1_050
+  // Simkl permits one scrobble operation per user at a time. Callers await each
+  // scrobble sequentially, so an additional fixed 20-second delay only makes a
+  // migration slower without reducing overlap.
+  const minimumWriteGapMs = path.startsWith('/scrobble/') ? 0 : 1_050
   if (isWrite) await waitForWriteSlot(connection.credentials, minimumWriteGapMs)
   try {
     return await requestBridgeJson(url.toString(), requestOptions)
@@ -633,7 +664,7 @@ async function simklRequest(
       20,
       Number(error.headers?.get?.('retry-after') || 0)
     )
-    await sleep(retrySeconds * 1000)
+    await sleep(retrySeconds * 1000, options.signal)
     await waitForWriteSlot(connection.credentials, minimumWriteGapMs)
     return requestBridgeJson(url.toString(), requestOptions)
   }
@@ -1388,6 +1419,129 @@ function mediaFromSimkl(value: any, kind: 'movie' | 'series'): MediaRef {
   }
 }
 
+function appendSimklItems(
+  data: any,
+  bucket: 'movies' | 'shows' | 'anime',
+  scopes: SyncScopes,
+  bundle: CanonicalBundle,
+  provenance: ReturnType<typeof sourceOf>
+) {
+  for (const item of simklRows(data, bucket)) {
+    const subject = item.movie || item.show || item.anime || item
+    const media = mediaFromSimkl(subject, bucket === 'movies' ? 'movie' : 'series')
+    const status = String(item.status || subject.status || '').toLowerCase()
+
+    if (scopes.library && ['plantowatch', 'plan-to-watch', 'watchlist'].includes(status)) {
+      bundle.library.push({
+        media,
+        addedAt: asEpochMs(item.added_to_watchlist_at || item.last_watched_at || item.updated_at),
+        lists: [{ ...provenance, kind: 'watchlist', name: 'Plan to Watch' }],
+        source: provenance
+      })
+    }
+
+    if (!scopes.history) continue
+    if (media.kind === 'movie') {
+      const watchedAt = item.last_watched_at || item.watched_at
+      if (watchedAt || status === 'completed') {
+        bundle.history.push({
+          media,
+          watchedAt: asEpochMs(watchedAt),
+          playCount: positiveNumber(item.watched, 1),
+          source: provenance
+        })
+      }
+      continue
+    }
+
+    for (const season of item.seasons || subject.seasons || []) {
+      for (const episode of season.episodes || []) {
+        const watchedAt = episode.watched_at || episode.last_watched_at
+        if (!watchedAt && episode.watched !== true && Number(episode.watched) < 1) continue
+        bundle.history.push({
+          media: {
+            ...media,
+            season: Number(season.number),
+            episode: Number(episode.number),
+            absoluteEpisode: Number(episode.episode) || undefined,
+            episodeTitle: episode.title
+          },
+          watchedAt: asEpochMs(watchedAt || item.last_watched_at),
+          playCount: positiveNumber(episode.watched, 1),
+          source: provenance
+        })
+      }
+    }
+  }
+}
+
+function appendSimklPlayback(
+  data: any,
+  bundle: CanonicalBundle,
+  issues: BridgeIssue[],
+  provenance: ReturnType<typeof sourceOf>
+) {
+  const rows = Array.isArray(data) ? data : Array.isArray(data?.playback) ? data.playback : []
+  for (const item of rows) {
+    const subject = item.movie || item.show || item.anime
+    const isMovie = Boolean(item.movie) || item.type === 'movie'
+    const media = mediaFromSimkl(subject, isMovie ? 'movie' : 'series')
+    if (!isMovie) {
+      media.season = Number(item.episode?.season)
+      media.episode = Number(item.episode?.number)
+      media.absoluteEpisode = Number(item.episode?.episode) || undefined
+      media.episodeTitle = item.episode?.title
+    }
+    const runtimeSeconds = positiveNumber(item.runtime) * (
+      positiveNumber(item.runtime) < 1_000 ? 60 : 1
+    )
+    const durationMs = positiveNumber(item.duration_ms)
+      || positiveNumber(item.runtime_seconds) * 1000
+      || runtimeSeconds * 1000
+    const percentage = positiveNumber(item.progress ?? item.percentage)
+    const positionMs = positiveNumber(item.current_position) * 1000
+      || (durationMs && percentage ? Math.round(durationMs * percentage / 100) : 0)
+    if (durationMs && positionMs) {
+      bundle.progress.push({
+        media,
+        positionMs,
+        durationMs,
+        percentage: Math.min(100, percentage || positionMs / durationMs * 100),
+        updatedAt: asEpochMs(item.paused_at || item.updated_at),
+        source: provenance
+      })
+    } else if (percentage) {
+      bundle.progress.push({
+        media,
+        percentage: Math.min(100, percentage),
+        updatedAt: asEpochMs(item.paused_at || item.updated_at),
+        source: provenance
+      })
+    } else {
+      issues.push({
+        scope: 'progress',
+        status: 'unresolved',
+        media,
+        reason: `${mediaLabel(media)} has no usable Simkl playback percentage or absolute position.`
+      })
+    }
+  }
+}
+
+function simklItemParams(scopes: SyncScopes, dateFrom?: string) {
+  return scopes.history
+    ? {
+        extended: 'full',
+        episode_watched_at: 'yes',
+        include_all_episodes: 'yes',
+        ...(dateFrom ? { date_from: dateFrom } : {})
+      }
+    : {
+        extended: 'simkl_ids_only',
+        ...(dateFrom ? { date_from: dateFrom } : {})
+      }
+}
+
 async function pullSimkl(options: PullOptions): Promise<PullResult> {
   const { connection, scopes, log } = options
   const bundle = createEmptyBundle()
@@ -1397,108 +1551,36 @@ async function pullSimkl(options: PullOptions): Promise<PullResult> {
   if (scopes.history || scopes.library) {
     logTo(log, 'Reading Simkl movies, shows, and anime sequentially...')
     for (const bucket of ['movies', 'shows', 'anime'] as const) {
-      const params = scopes.history
-        ? { extended: 'full', episode_watched_at: 'yes', include_all_episodes: 'yes' }
-        : { extended: 'simkl_ids_only' }
-      const { data } = await simklRequest(connection, `/sync/all-items/${bucket}`, params)
-      for (const item of simklRows(data, bucket)) {
-        const subject = item.movie || item.show || item.anime || item
-        const media = mediaFromSimkl(subject, bucket === 'movies' ? 'movie' : 'series')
-        const status = String(item.status || subject.status || '').toLowerCase()
-
-        if (scopes.library && ['plantowatch', 'plan-to-watch', 'watchlist'].includes(status)) {
-          bundle.library.push({
-            media,
-            addedAt: asEpochMs(item.added_to_watchlist_at || item.last_watched_at || item.updated_at),
-            lists: [{ ...provenance, kind: 'watchlist', name: 'Plan to Watch' }],
-            source: provenance
-          })
-        }
-
-        if (!scopes.history) continue
-        if (media.kind === 'movie') {
-          const watchedAt = item.last_watched_at || item.watched_at
-          if (watchedAt || status === 'completed') {
-            bundle.history.push({
-              media,
-              watchedAt: asEpochMs(watchedAt),
-              playCount: positiveNumber(item.watched, 1),
-              source: provenance
-            })
-          }
-          continue
-        }
-
-        for (const season of item.seasons || subject.seasons || []) {
-          for (const episode of season.episodes || []) {
-            const watchedAt = episode.watched_at || episode.last_watched_at
-            if (!watchedAt && episode.watched !== true && Number(episode.watched) < 1) continue
-            bundle.history.push({
-              media: {
-                ...media,
-                season: Number(season.number),
-                episode: Number(episode.number),
-                absoluteEpisode: Number(episode.episode) || undefined,
-                episodeTitle: episode.title
-              },
-              watchedAt: asEpochMs(watchedAt || item.last_watched_at),
-              playCount: positiveNumber(episode.watched, 1),
-              source: provenance
-            })
-          }
-        }
-      }
+      const { data } = await simklRequest(connection, `/sync/all-items/${bucket}`, simklItemParams(scopes))
+      appendSimklItems(data, bucket, scopes, bundle, provenance)
     }
   }
 
   if (scopes.progress) {
     logTo(log, 'Reading Simkl playback sessions...')
     const { data } = await simklRequest(connection, '/sync/playback')
-    const rows = Array.isArray(data) ? data : Array.isArray(data?.playback) ? data.playback : []
-    for (const item of rows) {
-      const subject = item.movie || item.show || item.anime
-      const isMovie = Boolean(item.movie) || item.type === 'movie'
-      const media = mediaFromSimkl(subject, isMovie ? 'movie' : 'series')
-      if (!isMovie) {
-        media.season = Number(item.episode?.season)
-        media.episode = Number(item.episode?.number)
-        media.absoluteEpisode = Number(item.episode?.episode) || undefined
-        media.episodeTitle = item.episode?.title
-      }
-      const runtimeSeconds = positiveNumber(item.runtime) * (
-        positiveNumber(item.runtime) < 1_000 ? 60 : 1
-      )
-      const durationMs = positiveNumber(item.duration_ms)
-        || positiveNumber(item.runtime_seconds) * 1000
-        || runtimeSeconds * 1000
-      const percentage = positiveNumber(item.progress ?? item.percentage)
-      const positionMs = positiveNumber(item.current_position) * 1000
-        || (durationMs && percentage ? Math.round(durationMs * percentage / 100) : 0)
-      if (durationMs && positionMs) {
-        bundle.progress.push({
-          media,
-          positionMs,
-          durationMs,
-          percentage: Math.min(100, percentage || positionMs / durationMs * 100),
-          updatedAt: asEpochMs(item.paused_at || item.updated_at),
-          source: provenance
-        })
-      } else if (percentage) {
-        bundle.progress.push({
-          media,
-          percentage: Math.min(100, percentage),
-          updatedAt: asEpochMs(item.paused_at || item.updated_at),
-          source: provenance
-        })
-      } else {
-        issues.push({
-          scope: 'progress',
-          status: 'unresolved',
-          media,
-          reason: `${mediaLabel(media)} has no usable Simkl playback percentage or absolute position.`
-        })
-      }
+    appendSimklPlayback(data, bundle, issues, provenance)
+  }
+
+  return { bundle: dedupeBundle(bundle), issues }
+}
+
+async function pullSimklDelta(options: PullOptions, dateFrom: string): Promise<PullResult> {
+  const { connection, scopes, log } = options
+  const bundle = createEmptyBundle()
+  const issues: BridgeIssue[] = []
+  const provenance = sourceOf(connection)
+
+  if (scopes.history || scopes.library) {
+    logTo(log, 'Simkl activity changed; reading the destination delta...')
+    const { data } = await simklRequest(connection, '/sync/all-items', simklItemParams(scopes, dateFrom))
+    for (const bucket of ['movies', 'shows', 'anime'] as const) {
+      appendSimklItems(data, bucket, scopes, bundle, provenance)
     }
+  }
+  if (scopes.progress) {
+    const { data } = await simklRequest(connection, '/sync/playback')
+    appendSimklPlayback(data, bundle, issues, provenance)
   }
 
   return { bundle: dedupeBundle(bundle), issues }
@@ -1546,34 +1628,119 @@ function groupSimklHistory(records: readonly HistoryRecord[]) {
   }
 }
 
+function simklHistoryEntryCount(item: any): number {
+  const episodes = (item?.seasons || []).reduce((total: number, season: any) => (
+    total + (Array.isArray(season?.episodes) ? season.episodes.length : 0)
+  ), 0)
+  return Math.max(1, episodes)
+}
+
+function simklHistoryPayloadCount(payload: any): number {
+  return (payload?.movies || []).length
+    + (payload?.shows || []).reduce((total: number, show: any) => total + simklHistoryEntryCount(show), 0)
+}
+
+function simklHistoryNotFoundIssues(data: any): BridgeIssue[] {
+  const result: BridgeIssue[] = []
+  const reason = 'Simkl could not match this history record.'
+  for (const movie of data?.not_found?.movies || []) {
+    result.push({ scope: 'history', status: 'unresolved', media: mediaFromSimkl(movie.movie || movie, 'movie'), reason })
+  }
+  for (const show of data?.not_found?.shows || []) {
+    const subject = show.show || show.anime || show
+    const media = mediaFromSimkl(subject, 'series')
+    let foundEpisode = false
+    for (const season of show.seasons || subject.seasons || []) {
+      for (const episode of season.episodes || []) {
+        foundEpisode = true
+        result.push({
+          scope: 'history',
+          status: 'unresolved',
+          media: { ...media, season: Number(season.number), episode: Number(episode.number) },
+          reason
+        })
+      }
+    }
+    if (!foundEpisode) result.push({ scope: 'history', status: 'unresolved', media, reason })
+  }
+  for (const episode of data?.not_found?.episodes || []) {
+    const subject = episode.show || episode.anime || episode
+    result.push({
+      scope: 'history',
+      status: 'unresolved',
+      media: {
+        ...mediaFromSimkl(subject, 'series'),
+        season: Number(episode.season ?? episode.episode?.season),
+        episode: Number(episode.number ?? episode.episode?.number)
+      },
+      reason
+    })
+  }
+  return result
+}
+
+function simklListNotFoundIssues(data: any): BridgeIssue[] {
+  const reason = 'Simkl could not match this saved title.'
+  return [
+    ...(data?.not_found?.movies || []).map((item: any) => ({
+      scope: 'library' as const,
+      status: 'unresolved' as const,
+      media: mediaFromSimkl(item.movie || item, 'movie'),
+      reason
+    })),
+    ...(data?.not_found?.shows || []).map((item: any) => ({
+      scope: 'library' as const,
+      status: 'unresolved' as const,
+      media: mediaFromSimkl(item.show || item.anime || item, 'series'),
+      reason
+    })),
+    ...(data?.not_found?.anime || []).map((item: any) => ({
+      scope: 'library' as const,
+      status: 'unresolved' as const,
+      media: mediaFromSimkl(item.anime || item, 'series'),
+      reason
+    }))
+  ]
+}
+
+function hasSimklWriteEnvelope(data: any): boolean {
+  return Boolean(data && typeof data === 'object' && data.added && data.not_found)
+}
+
 async function pushSimkl(options: PushOptions): Promise<PushResult> {
   const { connection, bundle, scopes, log } = options
   const written: PushCounts = { history: 0, progress: 0, library: 0 }
   const skipped: Partial<PushCounts> = {}
   const issues: BridgeIssue[] = []
+  const confirmedScopes: BridgeScope[] = []
 
   if (scopes.history && bundle.history.length) {
     const grouped = groupSimklHistory(bundle.history)
     issues.push(...grouped.issues)
+    if (grouped.issues.length) skipped.history = grouped.issues.length
     const payloads = [
       ...chunk(grouped.movies, 50).map(movies => ({ movies })),
       ...chunk(grouped.shows, 50).map(shows => ({ shows }))
     ]
+    let responsesComplete = true
     for (const payload of payloads) {
-      await simklRequest(connection, '/sync/history', { skip_auto_watching: 'yes' }, {
+      const { data } = await simklRequest(connection, '/sync/history', { skip_auto_watching: 'yes' }, {
         method: 'POST',
         body: JSON.stringify(payload)
       })
-      const count = (payload as any).movies?.length || (payload as any).shows?.reduce(
-        (total: number, show: any) => total + show.seasons.reduce(
-          (seasonTotal: number, season: any) => seasonTotal + season.episodes.length,
-          0
-        ),
-        0
-      ) || 0
-      written.history += count
+      const submitted = simklHistoryPayloadCount(payload)
+      if (hasSimklWriteEnvelope(data)) {
+        const notFound = simklHistoryNotFoundIssues(data)
+        issues.push(...notFound)
+        if (notFound.length) skipped.history = (skipped.history || 0) + notFound.length
+        written.history += Math.max(0, submitted - notFound.length)
+      } else {
+        responsesComplete = false
+        written.history += submitted
+      }
       logTo(log, `Added ${written.history} Simkl history records.`)
     }
+    if (responsesComplete) confirmedScopes.push('history')
   }
 
   if (scopes.library && bundle.library.length) {
@@ -1582,6 +1749,7 @@ async function pushSimkl(options: PushOptions): Promise<PushResult> {
     for (const record of bundle.library) {
       const ids = simklWriteIds(record.media)
       if (!ids) {
+        skipped.library = (skipped.library || 0) + 1
         issues.push({ scope: 'library', status: 'unresolved', media: record.media, reason: 'Simkl needs a supported external ID for this saved title.' })
         continue
       }
@@ -1596,30 +1764,122 @@ async function pushSimkl(options: PushOptions): Promise<PushResult> {
       ...chunk(movies, 50).map(batch => ({ movies: batch })),
       ...chunk(shows, 50).map(batch => ({ shows: batch }))
     ]
+    let responsesComplete = true
     for (const payload of payloads) {
-      await simklRequest(connection, '/sync/add-to-list', {}, {
+      const { data } = await simklRequest(connection, '/sync/add-to-list', {}, {
         method: 'POST',
         body: JSON.stringify(payload)
       })
-      written.library += (payload as any).movies?.length || (payload as any).shows?.length || 0
+      const submitted = (payload as any).movies?.length || (payload as any).shows?.length || 0
+      if (hasSimklWriteEnvelope(data)) {
+        const notFound = simklListNotFoundIssues(data)
+        issues.push(...notFound)
+        if (notFound.length) skipped.library = (skipped.library || 0) + notFound.length
+        written.library += Math.max(0, submitted - notFound.length)
+      } else {
+        responsesComplete = false
+        written.library += submitted
+      }
     }
+    if (responsesComplete) confirmedScopes.push('library')
     logTo(log, `Saved ${written.library} titles to Simkl Plan to Watch.`)
   }
 
   if (scopes.progress && bundle.progress.length) {
-    // Simkl only exposes resume-point writes through the real-time scrobble API.
-    // It applies a 20-second per-user lock and explicitly reserves these calls for
-    // player actions, so replaying a library here can take hours and be throttled.
-    skipped.progress = bundle.progress.length
-    issues.push({
-      scope: 'progress',
-      status: 'note',
-      reason: 'Simkl does not support bulk resume-point imports. History and Plan to Watch can still be transferred, but Continue Watching progress was skipped.'
-    })
-    logTo(log, `Skipped ${skipped.progress} Simkl resume points because Simkl does not provide a bulk progress-import endpoint.`)
+    // Simkl has no bulk playback write, so import resume points as sequential
+    // pause events. A single shared timeout bounds the whole optional phase; this
+    // prevents a rate-limit retry or stalled request from holding the sync open.
+    const signal = AbortSignal.timeout(SIMKL_PROGRESS_IMPORT_TIMEOUT_MS)
+    for (let index = 0; index < bundle.progress.length; index++) {
+      const record = bundle.progress[index]
+      const percentage = progressPercentage(record)
+      const ids = simklWriteIds(record.media)
+      const parsedVideoId = parseStremioVideoId(record.media.videoId)
+      const season = Number.isInteger(record.media.season)
+        ? Number(record.media.season)
+        : parsedVideoId?.season
+      const episode = Number.isInteger(record.media.episode)
+        ? Number(record.media.episode)
+        : parsedVideoId?.episode
+
+      if (!percentage) {
+        skipped.progress = (skipped.progress || 0) + 1
+        issues.push({
+          scope: 'progress',
+          status: 'unresolved',
+          media: record.media,
+          reason: 'Simkl progress needs a valid percentage or absolute position.'
+        })
+        continue
+      }
+      if (!ids) {
+        skipped.progress = (skipped.progress || 0) + 1
+        issues.push({
+          scope: 'progress',
+          status: 'unresolved',
+          media: record.media,
+          reason: 'Simkl progress needs a supported external ID.'
+        })
+        continue
+      }
+
+      const subject = {
+        title: record.media.title,
+        year: record.media.year,
+        ids
+      }
+      const payload: any = {
+        progress: Math.round(Math.min(100, percentage) * 10) / 10
+      }
+      if (record.media.kind === 'movie') {
+        payload.movie = subject
+      } else if (Number.isInteger(season) && Number.isInteger(episode)) {
+        payload.show = subject
+        payload.episode = { season, number: episode }
+      } else {
+        skipped.progress = (skipped.progress || 0) + 1
+        issues.push({
+          scope: 'progress',
+          status: 'unresolved',
+          media: record.media,
+          reason: 'The Simkl episode progress record has no deterministic season and episode number.'
+        })
+        continue
+      }
+
+      try {
+        await simklRequest(connection, '/scrobble/pause', {}, {
+          method: 'POST',
+          body: JSON.stringify(payload),
+          signal
+        })
+        written.progress++
+      } catch (error: any) {
+        if (signal.aborted || error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+          const remaining = bundle.progress.length - index
+          skipped.progress = (skipped.progress || 0) + remaining
+          issues.push({
+            scope: 'progress',
+            status: 'note',
+            reason: `Simkl Continue Watching import stopped after 30 seconds; ${remaining} resume point${remaining === 1 ? '' : 's'} were skipped.`
+          })
+          break
+        }
+        if (![400, 404, 409, 422, 429].includes(Number(error?.status))) throw error
+        skipped.progress = (skipped.progress || 0) + 1
+        issues.push({
+          scope: 'progress',
+          status: 'unresolved',
+          media: record.media,
+          reason: `Simkl rejected this resume point: ${errorDetail(error.body, error.message)}`
+        })
+      }
+    }
+    logTo(log, `Updated ${written.progress} Simkl resume points${skipped.progress ? `; skipped ${skipped.progress}` : ''}.`)
+    confirmedScopes.push('progress')
   }
 
-  return { written, issues, skipped }
+  return { written, issues, skipped, confirmedScopes }
 }
 
 interface StremioVideo {
@@ -2239,6 +2499,67 @@ export async function inspectDestinationMappings(
     }
   })
   return issues.filter((issue): issue is DestinationMappingIssue => Boolean(issue))
+}
+
+export async function createMediaBridgeVerificationCheckpoint(
+  options: Pick<PullOptions, 'connection' | 'log'>
+): Promise<MediaBridgeVerificationCheckpoint> {
+  if (options.connection.service !== 'simkl') return {}
+  try {
+    const { data } = await simklRequest(options.connection, '/sync/activities')
+    return {
+      simklActivity: typeof data?.all === 'string' ? data.all : undefined
+    }
+  } catch (error: any) {
+    logTo(options.log, `Could not capture Simkl activity before writing: ${errorDetail(error?.body, error?.message)}`)
+    return {}
+  }
+}
+
+function mergeVerificationBundle(baseline: CanonicalBundle, delta: CanonicalBundle): CanonicalBundle {
+  return dedupeBundle({
+    history: [...baseline.history, ...delta.history],
+    progress: [...baseline.progress, ...delta.progress],
+    library: [...baseline.library, ...delta.library]
+  })
+}
+
+export async function pullMediaBridgeForVerification(
+  options: VerificationPullOptions
+): Promise<PullResult> {
+  if (options.connection.service !== 'simkl') return pullMediaBridge(options)
+
+  const before = options.checkpoint.simklActivity
+  if (!before) {
+    logTo(options.log, 'Simkl activity checkpoint was unavailable; using the detailed write response for verification.')
+    return { bundle: dedupeBundle(options.baseline), issues: [] }
+  }
+
+  try {
+    const { data } = await simklRequest(options.connection, '/sync/activities')
+    const after = typeof data?.all === 'string' ? data.all : undefined
+    if (!after || after === before) {
+      logTo(options.log, 'Simkl reports no changed activity after the write; no destination reread is needed.')
+      return { bundle: dedupeBundle(options.baseline), issues: [] }
+    }
+    const delta = await pullSimklDelta(options, before)
+    return {
+      bundle: mergeVerificationBundle(options.baseline, delta.bundle),
+      issues: delta.issues
+    }
+  } catch (error: any) {
+    const reason = `Simkl accepted the write, but its activity delta could not be read: ${errorDetail(error?.body, error?.message)}`
+    return {
+      bundle: dedupeBundle(options.baseline),
+      issues: (['history', 'progress', 'library'] as const)
+        .filter(scope => options.scopes[scope])
+        .map(scope => ({
+          scope,
+          status: 'note',
+          reason
+        }))
+    }
+  }
 }
 
 export async function pullMediaBridge(options: PullOptions): Promise<PullResult> {

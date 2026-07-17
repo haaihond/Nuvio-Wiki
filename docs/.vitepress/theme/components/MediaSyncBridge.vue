@@ -24,6 +24,7 @@ import {
   type MediaBridgePreviewPlan
 } from './mediaBridgePlan'
 import {
+  createMediaBridgeVerificationCheckpoint,
   createNuvioConnection,
   createStremioDeviceLink,
   createStremioLinkedConnection,
@@ -31,6 +32,7 @@ import {
   identifyOAuthConnection,
   inspectDestinationMappings,
   pullMediaBridge,
+  pullMediaBridgeForVerification,
   pushMediaBridge,
   readStremioDeviceLink,
   signInNuvio,
@@ -669,6 +671,7 @@ async function preparePlan(
   })
   return {
     plan,
+    destination: destinationResult.bundle,
     issues: [...sourceResult.issues, ...destinationResult.issues]
   }
 }
@@ -750,6 +753,10 @@ async function runSync() {
       return
     }
 
+    const verificationCheckpoint = await createMediaBridgeVerificationCheckpoint({
+      connection: destinationConnection,
+      log: appendLog
+    })
     statusMessage.value = copy.value.syncing
     appendLog(`Writing changes to ${SERVICE_DEFINITIONS[destinationConnection.service].label}...`)
     const result = await pushMediaBridge({
@@ -758,19 +765,23 @@ async function runSync() {
       scopes: requestedScopes,
       log: appendLog
     })
-    appendLog('Reading the destination once more for verification...')
+    appendLog('Verifying the destination write...')
     statusMessage.value = copy.value.verifyingSync
-    const verified = await pullMediaBridge({
+    const verified = await pullMediaBridgeForVerification({
       connection: destinationConnection,
       scopes: requestedScopes,
-      log: appendLog
+      log: appendLog,
+      baseline: prepared.destination,
+      checkpoint: verificationCheckpoint
     })
     const remaining = planMediaBridgePreview({
       source: transfer,
       destination: verified.bundle,
       scopes: requestedScopes
     })
+    const confirmedScopes = new Set(result.confirmedScopes || [])
     for (const scope of ['history', 'progress', 'library'] as const) {
+      if (confirmedScopes.has(scope)) continue
       // Provider sync endpoints can return HTTP success with per-item misses.
       // Count only records observed in the destination refresh.
       result.written[scope] = Math.max(
@@ -778,15 +789,19 @@ async function runSync() {
         transfer[scope].length - remaining.transfer[scope].length
       )
     }
-    const unconfirmed = (['history', 'progress', 'library'] as const).reduce((count, scope) => (
-      count + Math.max(0, remaining.transfer[scope].length - (result.skipped?.[scope] || 0))
-    ), 0)
-    if (unconfirmed > 0) {
-      result.issues.push({
-        scope: 'history',
-        status: 'warning',
-        reason: `${unconfirmed} records could not be confirmed after the destination refresh.`
-      })
+    for (const scope of ['history', 'progress', 'library'] as const) {
+      if (confirmedScopes.has(scope)) continue
+      const unconfirmed = Math.max(
+        0,
+        remaining.transfer[scope].length - (result.skipped?.[scope] || 0)
+      )
+      if (unconfirmed > 0) {
+        result.issues.push({
+          scope,
+          status: 'warning',
+          reason: `${unconfirmed} ${formatScope(scope).toLowerCase()} record${unconfirmed === 1 ? '' : 's'} could not be confirmed after verification.`
+        })
+      }
     }
     result.issues.push(...verified.issues)
     syncResult.value = result

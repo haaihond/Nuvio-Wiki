@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createEmptyBundle } from './mediaBridgeCore.ts'
 import {
+  pullMediaBridgeForVerification,
   pushMediaBridge,
   type BridgeConnection
 } from './mediaBridgeProviders.ts'
@@ -49,6 +50,19 @@ function movieProgress(percentage: number, imdb = 'tt2015381') {
     },
     percentage,
     updatedAt: Date.UTC(2026, 6, 17)
+  }
+}
+
+function movieHistory(title: string, imdb: string, watchedAt: number) {
+  return {
+    media: {
+      kind: 'movie' as const,
+      ids: { imdb },
+      title,
+      year: 2024
+    },
+    watchedAt,
+    playCount: 1
   }
 }
 
@@ -142,15 +156,44 @@ test('keeps syncing after Trakt rejects an individual resume point', async t => 
   assert.match(result.issues[0].reason, /Invalid progress record/)
 })
 
-test('skips Simkl resume-point imports instead of replaying scrobble events', async t => {
-  const fetchMock = t.mock.method(globalThis, 'fetch', async () => {
-    throw new Error('Simkl should not be called for a bulk resume-point import.')
+test('imports Simkl resume points sequentially through pause within one 30-second budget', async t => {
+  let timeoutMs = 0
+  const timeoutController = new AbortController()
+  const timeoutMock = t.mock.method(AbortSignal, 'timeout', (ms: number) => {
+    timeoutMs = ms
+    return timeoutController.signal
+  })
+  const requests: Array<{ url: string; body: any }> = []
+  let activeRequests = 0
+  let maximumActiveRequests = 0
+  const fetchMock = t.mock.method(globalThis, 'fetch', async (input, init) => {
+    activeRequests++
+    maximumActiveRequests = Math.max(maximumActiveRequests, activeRequests)
+    await Promise.resolve()
+    requests.push({
+      url: String(input),
+      body: JSON.parse(String(init?.body || '{}'))
+    })
+    activeRequests--
+    return new Response(JSON.stringify({ action: 'pause' }), {
+      status: 201,
+      headers: { 'Content-Type': 'application/json' }
+    })
   })
   const logs: string[] = []
   const bundle = createEmptyBundle()
   bundle.progress.push(
     movieProgress(50),
-    movieProgress(40, 'tt2015382')
+    {
+      media: {
+        kind: 'series',
+        ids: { imdb: 'tt0944947' },
+        title: 'Game of Thrones',
+        videoId: 'tt0944947:2:3'
+      },
+      percentage: 40,
+      updatedAt: Date.UTC(2026, 6, 17)
+    }
   )
 
   const result = await pushMediaBridge({
@@ -160,13 +203,192 @@ test('skips Simkl resume-point imports instead of replaying scrobble events', as
     log: message => logs.push(message)
   })
 
-  assert.equal(fetchMock.mock.callCount(), 0)
+  assert.equal(timeoutMock.mock.callCount(), 1)
+  assert.equal(timeoutMs, 30_000)
+  assert.equal(fetchMock.mock.callCount(), 2)
+  assert.equal(maximumActiveRequests, 1)
+  assert.deepEqual(requests.map(request => new URL(request.url).pathname), [
+    '/scrobble/pause',
+    '/scrobble/pause'
+  ])
+  assert.deepEqual(requests[0].body, {
+    progress: 50,
+    movie: {
+      title: 'Almost Finished',
+      year: 2024,
+      ids: { imdb: 'tt2015381' }
+    }
+  })
+  assert.deepEqual(requests[1].body, {
+    progress: 40,
+    show: {
+      title: 'Game of Thrones',
+      ids: { imdb: 'tt0944947' }
+    },
+    episode: { season: 2, number: 3 }
+  })
+  assert.equal(result.written.progress, 2)
+  assert.equal(result.skipped?.progress, undefined)
+  assert.deepEqual(result.issues, [])
+  assert.deepEqual(logs, ['Updated 2 Simkl resume points.'])
+})
+
+test('stops the Simkl progress phase and skips the remainder when its budget expires', async t => {
+  const timeoutController = new AbortController()
+  t.mock.method(AbortSignal, 'timeout', () => timeoutController.signal)
+  const fetchMock = t.mock.method(globalThis, 'fetch', async () => {
+    timeoutController.abort(new DOMException('The operation timed out.', 'TimeoutError'))
+    throw timeoutController.signal.reason
+  })
+  const bundle = createEmptyBundle()
+  bundle.progress.push(
+    movieProgress(50),
+    movieProgress(40, 'tt2015382')
+  )
+
+  const result = await pushMediaBridge({
+    connection: simklConnection(),
+    bundle,
+    scopes: { history: false, progress: true, library: false }
+  })
+
+  assert.equal(fetchMock.mock.callCount(), 1)
   assert.equal(result.written.progress, 0)
   assert.equal(result.skipped?.progress, 2)
   assert.equal(result.issues.length, 1)
   assert.equal(result.issues[0].status, 'note')
-  assert.match(result.issues[0].reason, /does not support bulk resume-point imports/)
-  assert.deepEqual(logs, [
-    'Skipped 2 Simkl resume points because Simkl does not provide a bulk progress-import endpoint.'
-  ])
+  assert.match(result.issues[0].reason, /stopped after 30 seconds; 2 resume points were skipped/)
+})
+
+test('treats an accepted Simkl history no-op as confirmed without requiring a newer timestamp', async t => {
+  let requestBody: any = null
+  const fetchMock = t.mock.method(globalThis, 'fetch', async (input, init) => {
+    assert.equal(new URL(String(input)).pathname, '/sync/history')
+    requestBody = JSON.parse(String(init?.body || '{}'))
+    return new Response(JSON.stringify({
+      added: {
+        movies: 0,
+        shows: 0,
+        episodes: 0,
+        statuses: [{
+          request: requestBody.movies[0],
+          response: { status: 'completed', simkl_type: 'movie', anime_type: null }
+        }]
+      },
+      not_found: { movies: [], shows: [], episodes: [] }
+    }), {
+      status: 201,
+      headers: { 'Content-Type': 'application/json' }
+    })
+  })
+  const bundle = createEmptyBundle()
+  bundle.history.push(movieHistory('Already Watched', 'tt2015381', Date.UTC(2026, 6, 17)))
+
+  const result = await pushMediaBridge({
+    connection: simklConnection(),
+    bundle,
+    scopes: { history: true, progress: false, library: false }
+  })
+
+  assert.equal(fetchMock.mock.callCount(), 1)
+  assert.equal(result.written.history, 1)
+  assert.equal(result.skipped?.history, undefined)
+  assert.deepEqual(result.confirmedScopes, ['history'])
+  assert.deepEqual(result.issues, [])
+})
+
+test('reports Simkl history not_found records instead of counting the whole HTTP 201 as success', async t => {
+  const fetchMock = t.mock.method(globalThis, 'fetch', async (_input, init) => {
+    const body = JSON.parse(String(init?.body || '{}'))
+    return new Response(JSON.stringify({
+      added: {
+        movies: 1,
+        shows: 0,
+        episodes: 0,
+        statuses: [{
+          request: body.movies[0],
+          response: { status: 'completed', simkl_type: 'movie', anime_type: null }
+        }]
+      },
+      not_found: { movies: [body.movies[1]], shows: [], episodes: [] }
+    }), {
+      status: 201,
+      headers: { 'Content-Type': 'application/json' }
+    })
+  })
+  const bundle = createEmptyBundle()
+  bundle.history.push(
+    movieHistory('Found', 'tt2015381', Date.UTC(2026, 6, 17)),
+    movieHistory('Missing', 'tt0000000', Date.UTC(2026, 6, 16))
+  )
+
+  const result = await pushMediaBridge({
+    connection: simklConnection(),
+    bundle,
+    scopes: { history: true, progress: false, library: false }
+  })
+
+  assert.equal(fetchMock.mock.callCount(), 1)
+  assert.equal(result.written.history, 1)
+  assert.equal(result.skipped?.history, 1)
+  assert.deepEqual(result.confirmedScopes, ['history'])
+  assert.equal(result.issues.length, 1)
+  assert.equal(result.issues[0].scope, 'history')
+  assert.equal(result.issues[0].media?.title, 'Missing')
+  assert.match(result.issues[0].reason, /could not match/)
+})
+
+test('checks Simkl activities and merges only the changed destination delta for verification', async t => {
+  const requests: string[] = []
+  const fetchMock = t.mock.method(globalThis, 'fetch', async input => {
+    const url = new URL(String(input))
+    requests.push(url.toString())
+    if (url.pathname === '/sync/activities') {
+      return Response.json({ all: '2026-07-17T12:00:00Z' })
+    }
+    assert.equal(url.pathname, '/sync/all-items')
+    assert.equal(url.searchParams.get('date_from'), '2026-07-17T11:00:00Z')
+    return Response.json({
+      movies: [{
+        movie: { title: 'Changed', year: 2024, ids: { imdb: 'tt2015382' } },
+        status: 'completed',
+        last_watched_at: '2026-07-17T11:30:00Z'
+      }],
+      shows: [],
+      anime: []
+    })
+  })
+  const baseline = createEmptyBundle()
+  baseline.history.push(movieHistory('Existing', 'tt2015381', Date.UTC(2026, 6, 16)))
+
+  const result = await pullMediaBridgeForVerification({
+    connection: simklConnection(),
+    baseline,
+    checkpoint: { simklActivity: '2026-07-17T11:00:00Z' },
+    scopes: { history: true, progress: false, library: false }
+  })
+
+  assert.equal(fetchMock.mock.callCount(), 2)
+  assert.equal(result.bundle.history.length, 2)
+  assert.deepEqual(result.bundle.history.map(record => record.media.title).sort(), ['Changed', 'Existing'])
+  assert.match(requests[1], /date_from=2026-07-17T11%3A00%3A00Z/)
+})
+
+test('skips the Simkl destination reread when activities did not change', async t => {
+  const fetchMock = t.mock.method(globalThis, 'fetch', async input => {
+    assert.equal(new URL(String(input)).pathname, '/sync/activities')
+    return Response.json({ all: '2026-07-17T11:00:00Z' })
+  })
+  const baseline = createEmptyBundle()
+  baseline.history.push(movieHistory('Existing', 'tt2015381', Date.UTC(2026, 6, 16)))
+
+  const result = await pullMediaBridgeForVerification({
+    connection: simklConnection(),
+    baseline,
+    checkpoint: { simklActivity: '2026-07-17T11:00:00Z' },
+    scopes: { history: true, progress: false, library: false }
+  })
+
+  assert.equal(fetchMock.mock.callCount(), 1)
+  assert.equal(result.bundle.history.length, 1)
 })
