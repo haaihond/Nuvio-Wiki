@@ -2,14 +2,15 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createEmptyBundle } from './mediaBridgeCore.ts'
 import {
+  pullMediaBridge,
   pullMediaBridgeForVerification,
   pushMediaBridge,
   type BridgeConnection
 } from './mediaBridgeProviders.ts'
 
-function traktConnection(): BridgeConnection {
+function traktConnection(slot: 'source' | 'destination' = 'destination'): BridgeConnection {
   return {
-    slot: 'destination',
+    slot,
     service: 'trakt',
     accountId: 'test-account',
     displayName: 'Test Trakt account',
@@ -167,6 +168,123 @@ test('keeps syncing after Trakt rejects an individual resume point', async t => 
   assert.equal(result.issues.length, 1)
   assert.equal(result.issues[0].scope, 'progress')
   assert.match(result.issues[0].reason, /Invalid progress record/)
+})
+
+test('confirms Trakt history writes from the structured sync response', async t => {
+  const fetchMock = t.mock.method(globalThis, 'fetch', async (_input, init) => {
+    const body = JSON.parse(String(init?.body || '{}'))
+    assert.equal(body.movies.length, 2)
+    return Response.json({
+      added: { movies: 1, episodes: 0 },
+      updated: { movies: 0, episodes: 0 },
+      not_found: {
+        movies: [body.movies[1]],
+        shows: [],
+        seasons: [],
+        episodes: []
+      }
+    })
+  })
+  const bundle = createEmptyBundle()
+  bundle.history.push(
+    movieHistory('Found', 'tt2015381', Date.UTC(2026, 6, 17)),
+    movieHistory('Missing', 'tt0000000', Date.UTC(2026, 6, 16))
+  )
+
+  const result = await pushMediaBridge({
+    connection: traktConnection(),
+    bundle,
+    scopes: { history: true, progress: false, library: false }
+  })
+
+  assert.equal(fetchMock.mock.callCount(), 1)
+  assert.equal(result.written.history, 1)
+  assert.equal(result.skipped?.history, 1)
+  assert.deepEqual(result.confirmedScopes, ['history'])
+  assert.equal(result.issues.length, 1)
+  assert.match(result.issues[0].reason, /could not match 1 submitted history record/)
+})
+
+test('confirms nested Trakt episode history counts from the sync response', async t => {
+  const fetchMock = t.mock.method(globalThis, 'fetch', async (_input, init) => {
+    const body = JSON.parse(String(init?.body || '{}'))
+    assert.equal(body.shows.length, 1)
+    assert.equal(body.shows[0].seasons[0].episodes.length, 2)
+    return Response.json({
+      added: { movies: 0, episodes: 1 },
+      updated: { movies: 0, episodes: 1 },
+      not_found: { movies: [], shows: [], seasons: [], episodes: [] }
+    })
+  })
+  const bundle = createEmptyBundle()
+  for (const episode of [1, 2]) {
+    bundle.history.push({
+      media: {
+        kind: 'series',
+        ids: { imdb: 'tt0944947' },
+        title: 'Game of Thrones',
+        season: 1,
+        episode
+      },
+      watchedAt: Date.UTC(2026, 6, 17, episode),
+      playCount: 1
+    })
+  }
+
+  const result = await pushMediaBridge({
+    connection: traktConnection(),
+    bundle,
+    scopes: { history: true, progress: false, library: false }
+  })
+
+  assert.equal(fetchMock.mock.callCount(), 1)
+  assert.equal(result.written.history, 2)
+  assert.equal(result.skipped?.history, undefined)
+  assert.deepEqual(result.confirmedScopes, ['history'])
+  assert.deepEqual(result.issues, [])
+})
+
+test('falls back to destination verification for an incomplete Trakt history response', async t => {
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ success: true }))
+  const bundle = createEmptyBundle()
+  bundle.history.push(movieHistory('Fallback', 'tt2015381', Date.UTC(2026, 6, 17)))
+
+  const result = await pushMediaBridge({
+    connection: traktConnection(),
+    bundle,
+    scopes: { history: true, progress: false, library: false }
+  })
+
+  assert.equal(result.written.history, 1)
+  assert.deepEqual(result.confirmedScopes, [])
+  assert.deepEqual(result.issues, [])
+})
+
+test('only reports omitted Trakt replay timestamps when Trakt is the source', async t => {
+  t.mock.method(globalThis, 'fetch', async input => {
+    const path = new URL(String(input)).pathname
+    if (path === '/sync/watched/movies') {
+      return Response.json([{
+        plays: 3,
+        last_watched_at: '2026-07-17T12:00:00Z',
+        movie: {
+          title: 'Replay',
+          year: 2024,
+          ids: { trakt: 1, imdb: 'tt2015381' }
+        }
+      }])
+    }
+    if (path === '/sync/watched/shows') return Response.json([])
+    throw new Error(`Unexpected request: ${path}`)
+  })
+  const scopes = { history: true, progress: false, library: false }
+
+  const source = await pullMediaBridge({ connection: traktConnection('source'), scopes })
+  const destination = await pullMediaBridge({ connection: traktConnection('destination'), scopes })
+
+  assert.equal(source.issues.length, 1)
+  assert.match(source.issues[0].reason, /2 earlier play events cannot be transferred/)
+  assert.deepEqual(destination.issues, [])
 })
 
 test('imports Simkl resume points sequentially through pause within one 30-second budget', async t => {

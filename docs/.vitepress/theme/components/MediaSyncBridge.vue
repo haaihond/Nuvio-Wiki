@@ -767,45 +767,51 @@ async function runSync() {
       scopes: requestedScopes,
       log: appendLog
     })
-    appendLog('Verifying the destination write...')
-    statusMessage.value = copy.value.verifyingSync
-    const verified = await pullMediaBridgeForVerification({
-      connection: destinationConnection,
-      scopes: requestedScopes,
-      log: appendLog,
-      baseline: prepared.destination,
-      checkpoint: verificationCheckpoint
-    })
-    const remaining = planMediaBridgePreview({
-      source: transfer,
-      destination: verified.bundle,
-      scopes: requestedScopes
-    })
     const confirmedScopes = new Set(result.confirmedScopes || [])
-    for (const scope of ['history', 'progress', 'library'] as const) {
-      if (confirmedScopes.has(scope)) continue
-      // Provider sync endpoints can return HTTP success with per-item misses.
-      // Count only records observed in the destination refresh.
-      result.written[scope] = Math.max(
-        0,
-        transfer[scope].length - remaining.transfer[scope].length
-      )
+    const verificationScopes: SyncScopes = {
+      history: requestedScopes.history && transfer.history.length > 0 && !confirmedScopes.has('history'),
+      progress: requestedScopes.progress && transfer.progress.length > 0 && !confirmedScopes.has('progress'),
+      library: requestedScopes.library && transfer.library.length > 0 && !confirmedScopes.has('library')
     }
-    for (const scope of ['history', 'progress', 'library'] as const) {
-      if (confirmedScopes.has(scope)) continue
-      const unconfirmed = Math.max(
-        0,
-        remaining.transfer[scope].length - (result.skipped?.[scope] || 0)
-      )
-      if (unconfirmed > 0) {
-        result.issues.push({
-          scope,
-          status: 'warning',
-          reason: `${unconfirmed} ${formatScope(scope).toLowerCase()} record${unconfirmed === 1 ? '' : 's'} could not be confirmed after verification.`
-        })
+    if (Object.values(verificationScopes).some(Boolean)) {
+      appendLog('Verifying unconfirmed destination writes...')
+      statusMessage.value = copy.value.verifyingSync
+      const verified = await pullMediaBridgeForVerification({
+        connection: destinationConnection,
+        scopes: verificationScopes,
+        log: appendLog,
+        baseline: prepared.destination,
+        checkpoint: verificationCheckpoint
+      })
+      const remaining = planMediaBridgePreview({
+        source: transfer,
+        destination: verified.bundle,
+        scopes: verificationScopes
+      })
+      for (const scope of ['history', 'progress', 'library'] as const) {
+        if (!verificationScopes[scope]) continue
+        // Provider sync endpoints can return HTTP success with per-item misses.
+        // Count only records observed in the destination refresh.
+        result.written[scope] = Math.max(
+          0,
+          transfer[scope].length - remaining.transfer[scope].length
+        )
+        const unconfirmed = Math.max(
+          0,
+          remaining.transfer[scope].length - (result.skipped?.[scope] || 0)
+        )
+        if (unconfirmed > 0) {
+          result.issues.push({
+            scope,
+            status: 'warning',
+            reason: `${unconfirmed} ${formatScope(scope).toLowerCase()} record${unconfirmed === 1 ? '' : 's'} could not be confirmed after verification.`
+          })
+        }
       }
+      result.issues.push(...verified.issues)
+    } else {
+      appendLog('Destination write responses confirmed every submitted record.')
     }
-    result.issues.push(...verified.issues)
     syncResult.value = result
     providerIssues.value = [...providerIssues.value, ...result.issues]
     appendLog(`Sync finished. Wrote ${result.written.history} history, ${result.written.progress} progress, and ${result.written.library} saved-title records.`)

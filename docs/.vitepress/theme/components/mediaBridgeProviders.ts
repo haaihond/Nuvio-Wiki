@@ -899,7 +899,10 @@ async function pullTrakt(options: PullOptions): Promise<PullResult> {
         }
       }
     }
-    if (omittedPlayEvents) {
+    // This is a source-fidelity warning. A destination/verification read only
+    // needs the latest watched state, so surfacing it there creates duplicate
+    // and misleading warnings before and after a Trakt write.
+    if (omittedPlayEvents && connection.slot === 'source') {
       issues.push({
         scope: 'history',
         status: 'warning',
@@ -1008,27 +1011,73 @@ function groupTraktHistory(records: readonly HistoryRecord[]) {
   }
 }
 
+function traktHistoryPayloadCount(payload: { movies?: any[]; shows?: any[] }): number {
+  return (payload.movies?.length || 0) + (payload.shows || []).reduce((showCount: number, show: any) => (
+    showCount + (show.seasons || []).reduce((seasonCount: number, season: any) => (
+      seasonCount + (season.episodes?.length || 0)
+    ), 0)
+  ), 0)
+}
+
+function traktHistoryResponseCount(data: any): number | null {
+  const counts = [
+    data?.added?.movies,
+    data?.added?.episodes,
+    data?.updated?.movies,
+    data?.updated?.episodes
+  ]
+  if (
+    !data?.not_found
+    || counts.some(value => !Number.isInteger(value) || value < 0)
+  ) return null
+  return counts.reduce((total, value) => total + Number(value), 0)
+}
+
 async function pushTrakt(options: PushOptions): Promise<PushResult> {
   const { connection, bundle, scopes, log } = options
   const issues: BridgeIssue[] = []
   const written: PushCounts = { history: 0, progress: 0, library: 0 }
+  const skipped: Partial<PushCounts> = {}
+  const confirmedScopes: BridgeScope[] = []
   let completedResumePoints = 0
 
   if (scopes.history && bundle.history.length) {
     const grouped = groupTraktHistory(bundle.history)
     issues.push(...grouped.issues)
-    for (const movies of chunk(grouped.movies, 100)) {
-      await traktRequest(connection, '/sync/history', {}, { method: 'POST', body: JSON.stringify({ movies }) })
-      written.history += movies.length
+    if (grouped.issues.length) skipped.history = grouped.issues.length
+    const payloads = [
+      ...chunk(grouped.movies, 100).map(movies => ({ movies })),
+      ...chunk(grouped.shows, 50).map(shows => ({ shows }))
+    ]
+    let responsesComplete = true
+    let notFound = 0
+    for (const payload of payloads) {
+      const { data } = await traktRequest(connection, '/sync/history', {}, {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      })
+      const submitted = traktHistoryPayloadCount(payload)
+      const confirmed = traktHistoryResponseCount(data)
+      if (confirmed === null || confirmed > submitted) {
+        // Retain the destination-reread fallback for legacy or malformed
+        // responses that do not account for every submitted record.
+        responsesComplete = false
+        written.history += submitted
+      } else {
+        written.history += confirmed
+        notFound += submitted - confirmed
+      }
       logTo(log, `Added ${written.history} Trakt history records.`)
     }
-    for (const shows of chunk(grouped.shows, 50)) {
-      await traktRequest(connection, '/sync/history', {}, { method: 'POST', body: JSON.stringify({ shows }) })
-      written.history += shows.reduce((count: number, show: any) => (
-        count + show.seasons.reduce((sum: number, season: any) => sum + season.episodes.length, 0)
-      ), 0)
-      logTo(log, `Added ${written.history} Trakt history records.`)
+    if (notFound) {
+      skipped.history = (skipped.history || 0) + notFound
+      issues.push({
+        scope: 'history',
+        status: 'unresolved',
+        reason: `Trakt could not match ${notFound} submitted history record${notFound === 1 ? '' : 's'}.`
+      })
     }
+    if (responsesComplete) confirmedScopes.push('history')
   }
 
   if (scopes.progress && bundle.progress.length) {
@@ -1113,6 +1162,7 @@ async function pushTrakt(options: PushOptions): Promise<PushResult> {
       }
     }
     if (completedResumePoints) {
+      skipped.progress = (skipped.progress || 0) + completedResumePoints
       issues.push({
         scope: 'progress',
         status: 'note',
@@ -1164,7 +1214,8 @@ async function pushTrakt(options: PushOptions): Promise<PushResult> {
   return {
     written,
     issues,
-    ...(completedResumePoints ? { skipped: { progress: completedResumePoints } } : {})
+    skipped,
+    confirmedScopes
   }
 }
 
