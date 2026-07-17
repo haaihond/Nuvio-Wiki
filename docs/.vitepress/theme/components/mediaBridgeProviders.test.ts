@@ -25,6 +25,20 @@ function traktConnection(): BridgeConnection {
   }
 }
 
+function simklConnection(): BridgeConnection {
+  return {
+    slot: 'destination',
+    service: 'simkl',
+    accountId: 'test-account',
+    displayName: 'Test Simkl account',
+    credentials: {
+      service: 'simkl',
+      clientId: 'test-client',
+      accessToken: 'test-token'
+    }
+  }
+}
+
 function movieProgress(percentage: number, imdb = 'tt2015381') {
   return {
     media: {
@@ -126,4 +140,33 @@ test('keeps syncing after Trakt rejects an individual resume point', async t => 
   assert.equal(result.issues.length, 1)
   assert.equal(result.issues[0].scope, 'progress')
   assert.match(result.issues[0].reason, /Invalid progress record/)
+})
+
+test('skips Simkl resume-point imports instead of replaying scrobble events', async t => {
+  const fetchMock = t.mock.method(globalThis, 'fetch', async () => {
+    throw new Error('Simkl should not be called for a bulk resume-point import.')
+  })
+  const logs: string[] = []
+  const bundle = createEmptyBundle()
+  bundle.progress.push(
+    movieProgress(50),
+    movieProgress(40, 'tt2015382')
+  )
+
+  const result = await pushMediaBridge({
+    connection: simklConnection(),
+    bundle,
+    scopes: { history: false, progress: true, library: false },
+    log: message => logs.push(message)
+  })
+
+  assert.equal(fetchMock.mock.callCount(), 0)
+  assert.equal(result.written.progress, 0)
+  assert.equal(result.skipped?.progress, 2)
+  assert.equal(result.issues.length, 1)
+  assert.equal(result.issues[0].status, 'note')
+  assert.match(result.issues[0].reason, /does not support bulk resume-point imports/)
+  assert.deepEqual(logs, [
+    'Skipped 2 Simkl resume points because Simkl does not provide a bulk progress-import endpoint.'
+  ])
 })

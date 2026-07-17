@@ -1549,6 +1549,7 @@ function groupSimklHistory(records: readonly HistoryRecord[]) {
 async function pushSimkl(options: PushOptions): Promise<PushResult> {
   const { connection, bundle, scopes, log } = options
   const written: PushCounts = { history: 0, progress: 0, library: 0 }
+  const skipped: Partial<PushCounts> = {}
   const issues: BridgeIssue[] = []
 
   if (scopes.history && bundle.history.length) {
@@ -1606,35 +1607,19 @@ async function pushSimkl(options: PushOptions): Promise<PushResult> {
   }
 
   if (scopes.progress && bundle.progress.length) {
-    for (const record of bundle.progress) {
-      const ids = simklWriteIds(record.media)
-      const percentage = progressPercentage(record)
-      if (!ids || !percentage) {
-        issues.push({ scope: 'progress', status: 'unresolved', media: record.media, reason: 'Simkl progress needs a supported ID and valid percentage or absolute position.' })
-        continue
-      }
-      const payload: any = {
-        progress: Math.max(0.1, Math.min(99.9, percentage))
-      }
-      if (record.media.kind === 'movie') {
-        payload.movie = { title: record.media.title, year: record.media.year, ids }
-      } else if (Number.isInteger(record.media.season) && Number.isInteger(record.media.episode)) {
-        payload.show = { title: record.media.title, year: record.media.year, ids }
-        payload.episode = { season: record.media.season, number: record.media.episode }
-      } else {
-        issues.push({ scope: 'progress', status: 'unresolved', media: record.media, reason: 'The Simkl episode progress has no deterministic season and episode number.' })
-        continue
-      }
-      await simklRequest(connection, '/scrobble/pause', {}, {
-        method: 'POST',
-        body: JSON.stringify(payload)
-      })
-      written.progress++
-    }
-    logTo(log, `Updated ${written.progress} Simkl resume points.`)
+    // Simkl only exposes resume-point writes through the real-time scrobble API.
+    // It applies a 20-second per-user lock and explicitly reserves these calls for
+    // player actions, so replaying a library here can take hours and be throttled.
+    skipped.progress = bundle.progress.length
+    issues.push({
+      scope: 'progress',
+      status: 'note',
+      reason: 'Simkl does not support bulk resume-point imports. History and Plan to Watch can still be transferred, but Continue Watching progress was skipped.'
+    })
+    logTo(log, `Skipped ${skipped.progress} Simkl resume points because Simkl does not provide a bulk progress-import endpoint.`)
   }
 
-  return { written, issues }
+  return { written, issues, skipped }
 }
 
 interface StremioVideo {
