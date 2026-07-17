@@ -281,7 +281,10 @@ const canPreview = computed(() => (
   && !actionBusy.value
 ))
 const canSync = computed(() => canPreview.value)
-const syncHasWarnings = computed(() => Boolean(syncResult.value && providerIssues.value.length))
+const syncHasWarnings = computed(() => Boolean(
+  syncResult.value && providerIssues.value.some(issue => issue.status !== 'note')
+))
+const syncHasNotes = computed(() => Boolean(syncResult.value && providerIssues.value.length))
 const finishedIssueGroups = computed(() => {
   const groups = new Map<string, BridgeIssue & { count: number; mediaLabels: string[] }>()
   for (const issue of providerIssues.value) {
@@ -775,18 +778,21 @@ async function runSync() {
         transfer[scope].length - remaining.transfer[scope].length
       )
     }
-    if (remaining.stats.add + remaining.stats.update > 0) {
+    const unconfirmed = (['history', 'progress', 'library'] as const).reduce((count, scope) => (
+      count + Math.max(0, remaining.transfer[scope].length - (result.skipped?.[scope] || 0))
+    ), 0)
+    if (unconfirmed > 0) {
       result.issues.push({
         scope: 'history',
         status: 'warning',
-        reason: `${remaining.stats.add + remaining.stats.update} records could not be confirmed after the destination refresh.`
+        reason: `${unconfirmed} records could not be confirmed after the destination refresh.`
       })
     }
     result.issues.push(...verified.issues)
     syncResult.value = result
     providerIssues.value = [...providerIssues.value, ...result.issues]
     appendLog(`Sync finished. Wrote ${result.written.history} history, ${result.written.progress} progress, and ${result.written.library} saved-title records.`)
-    statusMessage.value = providerIssues.value.length ? copy.value.finishedWarnings : copy.value.result
+    statusMessage.value = syncHasWarnings.value ? copy.value.finishedWarnings : copy.value.result
   } catch (error: any) {
     globalError.value = error.message
     appendLog(`Sync failed: ${error.message}`)
@@ -1237,7 +1243,7 @@ onBeforeUnmount(() => {
               {{ syncResult.written.library }} {{ copy.savedTitlesUnit }}
             </p>
             <section
-              v-if="syncHasWarnings"
+              v-if="syncHasNotes"
               class="sync-run-notes"
               aria-labelledby="sync-run-notes-title"
             >
@@ -1525,7 +1531,7 @@ td strong { color: var(--vp-c-text-1); font-weight: 650; }
 .issues-panel ul { display: grid; gap: 7px; margin: 12px 0 0; padding: 0; list-style: none; }
 .issues-panel li { display: flex; align-items: flex-start; gap: 8px; color: var(--vp-c-text-2); font-size: 11px; line-height: 1.5; }
 .issue-status { background: var(--vp-c-warning-soft); color: var(--vp-c-warning-1); text-transform: uppercase; }
-.issue-warning { background: var(--vp-c-default-soft); color: var(--vp-c-text-2); }
+.issue-warning, .issue-note { background: var(--vp-c-default-soft); color: var(--vp-c-text-2); }
 .issues-panel > p { margin: 9px 0 0; color: var(--vp-c-text-3); font-size: 10px; }
 
 .result-panel { gap: 13px; margin-top: 16px; padding: 16px; border: 1px solid color-mix(in srgb, var(--vp-c-green-1) 40%, var(--vp-c-divider)); border-radius: var(--bridge-radius); background: var(--vp-c-green-soft); }

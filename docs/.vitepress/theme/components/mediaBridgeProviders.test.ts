@@ -64,13 +64,16 @@ test('uses Trakt stop below 80 percent to create a paused resume point', async t
   assert.deepEqual(result.issues, [])
 })
 
-test('skips Trakt resume points at 80 percent or higher without writing history', async t => {
+test('reports Trakt resume points at 80 percent or higher once as a note', async t => {
   const fetchMock = t.mock.method(globalThis, 'fetch', async () => {
     throw new Error('Trakt should not be called for completed progress.')
   })
 
   const bundle = createEmptyBundle()
-  bundle.progress.push(movieProgress(99))
+  bundle.progress.push(
+    movieProgress(99),
+    movieProgress(80, 'tt2015382')
+  )
   const result = await pushMediaBridge({
     connection: traktConnection(),
     bundle,
@@ -80,7 +83,13 @@ test('skips Trakt resume points at 80 percent or higher without writing history'
   assert.equal(fetchMock.mock.callCount(), 0)
   assert.equal(result.written.progress, 0)
   assert.equal(result.issues.length, 1)
-  assert.match(result.issues[0].reason, /80% or higher/)
+  assert.equal(result.issues[0].status, 'note')
+  assert.equal(result.issues[0].media, undefined)
+  assert.equal(
+    result.issues[0].reason,
+    'Trakt cannot store resume points at 80% or higher; it treats them as watched. Transfer watch history to preserve the completed state.'
+  )
+  assert.equal(result.skipped?.progress, 2)
 })
 
 test('keeps syncing after Trakt rejects an individual resume point', async t => {

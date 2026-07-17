@@ -131,7 +131,7 @@ export type BridgeLog = (message: string) => void
 
 export interface BridgeIssue {
   scope: keyof SyncScopes
-  status: 'ambiguous' | 'unresolved' | 'warning'
+  status: 'ambiguous' | 'unresolved' | 'warning' | 'note'
   media?: MediaRef
   reason: string
 }
@@ -150,6 +150,7 @@ export interface PushCounts {
 export interface PushResult {
   written: PushCounts
   issues: BridgeIssue[]
+  skipped?: Partial<PushCounts>
 }
 
 export interface PullOptions {
@@ -980,6 +981,7 @@ async function pushTrakt(options: PushOptions): Promise<PushResult> {
   const { connection, bundle, scopes, log } = options
   const issues: BridgeIssue[] = []
   const written: PushCounts = { history: 0, progress: 0, library: 0 }
+  let completedResumePoints = 0
 
   if (scopes.history && bundle.history.length) {
     const grouped = groupTraktHistory(bundle.history)
@@ -1009,12 +1011,7 @@ async function pushTrakt(options: PushOptions): Promise<PushResult> {
         // Trakt treats 80% and above as completed and no longer accepts it as
         // playback state. Do not call /scrobble/stop because that would turn a
         // progress-only transfer into a new watch-history event.
-        issues.push({
-          scope: 'progress',
-          status: 'unresolved',
-          media: record.media,
-          reason: 'Trakt cannot store resume points at 80% or higher; it treats them as watched. Transfer watch history to preserve the completed state.'
-        })
+        completedResumePoints++
         continue
       }
       const payload: any = {
@@ -1084,6 +1081,13 @@ async function pushTrakt(options: PushOptions): Promise<PushResult> {
         })
       }
     }
+    if (completedResumePoints) {
+      issues.push({
+        scope: 'progress',
+        status: 'note',
+        reason: 'Trakt cannot store resume points at 80% or higher; it treats them as watched. Transfer watch history to preserve the completed state.'
+      })
+    }
     logTo(log, `Updated ${written.progress} Trakt resume points.`)
   }
 
@@ -1126,7 +1130,11 @@ async function pushTrakt(options: PushOptions): Promise<PushResult> {
     logTo(log, `Saved ${written.library} Trakt watchlist or collection entries.`)
   }
 
-  return { written, issues }
+  return {
+    written,
+    issues,
+    ...(completedResumePoints ? { skipped: { progress: completedResumePoints } } : {})
+  }
 }
 
 async function pullNuvio(options: PullOptions): Promise<PullResult> {
