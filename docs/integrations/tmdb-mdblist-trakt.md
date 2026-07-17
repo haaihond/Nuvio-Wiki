@@ -83,7 +83,7 @@ Use the web-based Sync Bridge to preview and transfer supported tracking data in
 
 **How to use the Sync Bridge:**
 
-1. Open the [Nuvio Sync Bridge](/tools#trakt).
+1. Open the [Nuvio Sync Bridge](/tools#sync-bridge).
 2. Choose the **From** and **To** services.
 3. Connect the source and destination separately. For a same-service transfer, use different accounts; for Nuvio, choose a different destination account or profile.
 4. Select the data categories available for that pairing, such as watched history, playback progress, watchlist, or collection.

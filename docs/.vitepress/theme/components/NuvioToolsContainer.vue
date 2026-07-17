@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, markRaw, ref, onMounted, onUnmounted } from 'vue'
 
-type ToolId = 'quickstart' | 'badge-editor' | 'p2p' | 'trakt' | 'configuration-profiles' | 'profile-transfer'
+type ToolId = 'quickstart' | 'badge-editor' | 'p2p' | 'sync-bridge' | 'configuration-profiles' | 'profile-transfer'
 
 type ToolTab = {
   id: ToolId
@@ -54,7 +54,7 @@ const tabs: ToolTab[] = [
     icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="tab-icon-svg"><path d="M18 8A3 3 0 1 0 15 5a3 3 0 0 0 3 3ZM6 15a3 3 0 1 0-3-3 3 3 0 0 0 3 3Zm12 6a3 3 0 1 0-3-3 3 3 0 0 0 3 3Zm-3.5-3.5-8-4M8.5 11l8-4"/></svg>`
   },
   {
-    id: 'trakt',
+    id: 'sync-bridge',
     label: 'Sync Bridge',
     description: 'Sync Simkl, Stremio, Trakt, and Nuvio.',
     title: 'Nuvio Sync Bridge',

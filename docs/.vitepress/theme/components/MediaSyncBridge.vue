@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   computed,
+  nextTick,
   onBeforeUnmount,
   onMounted,
   reactive,
@@ -57,7 +58,7 @@ const isDutch = computed(() => String(lang.value || '').startsWith('nl'))
 const copy = computed(() => isDutch.value ? {
   title: 'Nuvio Sync Bridge',
   subtitle: 'Verplaats kijkgeschiedenis, voortgang en opgeslagen titels tussen Simkl, Stremio, Trakt en Nuvio.',
-  info: 'Koppel een bron en bestemming, bekijk elke wijziging en synchroniseer pas daarna. Bestaande bestemmingsgegevens blijven behouden.',
+  info: 'Koppel een bron en bestemming en start direct met synchroniseren. Een voorbeeld bekijken is optioneel. Bestaande bestemmingsgegevens blijven behouden.',
   source: 'Bron',
   destination: 'Bestemming',
   chooseService: 'Kies dienst',
@@ -77,7 +78,7 @@ const copy = computed(() => isDutch.value ? {
   progressHelp: 'De nieuwste actieve afspeelpositie',
   library: 'Opgeslagen titels',
   libraryHelp: 'Watchlist, collectie of bibliotheek',
-  preview: 'Voorbeeld maken',
+  preview: 'Wijzigingen bekijken (optioneel)',
   previewing: 'Gegevens vergelijken…',
   sync: 'Synchronisatie uitvoeren',
   syncing: 'Synchroniseren…',
@@ -114,11 +115,18 @@ const copy = computed(() => isDutch.value ? {
   moreNotes: 'extra meldingen in deze run',
   historyUnit: 'geschiedenis',
   progressUnit: 'voortgang',
-  savedTitlesUnit: 'opgeslagen titels'
+  savedTitlesUnit: 'opgeslagen titels',
+  preparingSync: 'Synchronisatie voorbereiden…',
+  verifyingSync: 'Bestemming controleren…',
+  keepOpen: 'Laat deze pagina open terwijl je gegevens worden vergeleken, geschreven en gecontroleerd.',
+  syncFailed: 'Synchronisatie mislukt',
+  backToBridge: 'Terug naar Sync Bridge',
+  supportMessage: 'If this helped you out or saved you some time consider supporting me ❤️',
+  supportButton: 'Support me on Ko-fi'
 } : {
   title: 'Nuvio Sync Bridge',
   subtitle: 'Move watch history, playback progress, and saved titles between Simkl, Stremio, Trakt, and Nuvio.',
-  info: 'Connect a source and destination, inspect every change, then sync. Existing destination data is preserved.',
+  info: 'Connect a source and destination and start syncing directly. Previewing changes is optional. Existing destination data is preserved.',
   source: 'Source',
   destination: 'Destination',
   chooseService: 'Choose service',
@@ -138,7 +146,7 @@ const copy = computed(() => isDutch.value ? {
   progressHelp: 'The newest active playback position',
   library: 'Saved titles',
   libraryHelp: 'Watchlist, collection, or library membership',
-  preview: 'Build preview',
+  preview: 'Preview changes (optional)',
   previewing: 'Comparing data…',
   sync: 'Run sync',
   syncing: 'Syncing…',
@@ -175,7 +183,14 @@ const copy = computed(() => isDutch.value ? {
   moreNotes: 'more notes in this run',
   historyUnit: 'history',
   progressUnit: 'progress',
-  savedTitlesUnit: 'saved titles'
+  savedTitlesUnit: 'saved titles',
+  preparingSync: 'Preparing your sync…',
+  verifyingSync: 'Verifying the destination…',
+  keepOpen: 'Keep this page open while your data is compared, written, and verified.',
+  syncFailed: 'Sync failed',
+  backToBridge: 'Back to Sync Bridge',
+  supportMessage: 'If this helped you out or saved you some time consider supporting me ❤️',
+  supportButton: 'Support me on Ko-fi'
 })
 
 const bridgeSlots: readonly BridgeSlot[] = ['source', 'destination']
@@ -211,6 +226,8 @@ const previewSignature = ref('')
 const providerIssues = ref<BridgeIssue[]>([])
 const syncResult = ref<PushResult | null>(null)
 const activity = ref<string[]>([])
+const syncViewOpen = ref(false)
+const syncView = ref<HTMLElement | null>(null)
 const previewPage = ref(1)
 const previewPageSize = 50
 
@@ -253,13 +270,9 @@ const canPreview = computed(() => (
   && enabledScopeCount.value > 0
   && !actionBusy.value
 ))
-const canSync = computed(() => (
-  Boolean(preview.value)
-  && previewSignature.value === currentSignature.value
-  && transferCount.value > 0
-  && !actionBusy.value
-))
+const canSync = computed(() => canPreview.value)
 const syncHasWarnings = computed(() => Boolean(syncResult.value && providerIssues.value.length))
+const latestActivity = computed(() => activity.value[activity.value.length - 1] || statusMessage.value)
 const previewRows = computed(() => {
   const start = (previewPage.value - 1) * previewPageSize
   return preview.value?.rows.slice(start, start + previewPageSize) || []
@@ -268,6 +281,9 @@ const previewPages = computed(() => Math.max(
   1,
   Math.ceil((preview.value?.rows.length || 0) / previewPageSize)
 ))
+
+let documentOverflowBeforeSync = ''
+let documentScrollLocked = false
 
 function slotLabel(slot: BridgeSlot) {
   return slot === 'source' ? copy.value.source : copy.value.destination
@@ -292,6 +308,28 @@ function appendLog(message: string) {
 
 function wait(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function restoreDocumentScroll() {
+  if (!documentScrollLocked || typeof document === 'undefined') return
+  document.documentElement.style.overflow = documentOverflowBeforeSync
+  documentScrollLocked = false
+}
+
+function openSyncView() {
+  if (!syncViewOpen.value && typeof document !== 'undefined') {
+    documentOverflowBeforeSync = document.documentElement.style.overflow
+    document.documentElement.style.overflow = 'hidden'
+    documentScrollLocked = true
+  }
+  syncViewOpen.value = true
+  void nextTick(() => syncView.value?.focus())
+}
+
+function closeSyncView() {
+  if (actionBusy.value === 'sync') return
+  syncViewOpen.value = false
+  restoreDocumentScroll()
 }
 
 function clearPreview() {
@@ -573,8 +611,45 @@ function updateNuvioProfile(slot: BridgeSlot, event: Event) {
   clearPreview()
 }
 
+async function preparePlan(
+  sourceConnection: BridgeConnection,
+  destinationConnection: BridgeConnection,
+  requestedScopes: SyncScopes
+) {
+  const [sourceResult, destinationResult] = await Promise.all([
+    pullMediaBridge({ connection: sourceConnection, scopes: requestedScopes, log: appendLog }),
+    pullMediaBridge({ connection: destinationConnection, scopes: requestedScopes, log: appendLog })
+  ])
+  const mappingIssues = await inspectDestinationMappings(
+    destinationConnection,
+    sourceResult.bundle,
+    requestedScopes,
+    appendLog,
+    sourceConnection
+  )
+  const plan = planMediaBridgePreview({
+    source: sourceResult.bundle,
+    destination: destinationResult.bundle,
+    scopes: requestedScopes,
+    mappingIssues
+  })
+  return {
+    plan,
+    issues: [...sourceResult.issues, ...destinationResult.issues]
+  }
+}
+
+function planTransferCount(plan: MediaBridgePreviewPlan) {
+  return plan.transfer.history.length
+    + plan.transfer.progress.length
+    + plan.transfer.library.length
+}
+
 async function buildPreview() {
   if (!canPreview.value || !connections.source || !connections.destination) return
+  const sourceConnection = connections.source
+  const destinationConnection = connections.destination
+  const requestedScopes = { ...scopes }
   actionBusy.value = 'preview'
   globalError.value = ''
   statusMessage.value = copy.value.previewing
@@ -582,29 +657,14 @@ async function buildPreview() {
   syncResult.value = null
   appendLog(`Preparing ${routeName.value}.`)
   try {
-    const requestedScopes = { ...scopes }
-    const [sourceResult, destinationResult] = await Promise.all([
-      pullMediaBridge({ connection: connections.source, scopes: requestedScopes, log: appendLog }),
-      pullMediaBridge({ connection: connections.destination, scopes: requestedScopes, log: appendLog })
-    ])
-    const mappingIssues = await inspectDestinationMappings(
-      connections.destination,
-      sourceResult.bundle,
-      requestedScopes,
-      appendLog,
-      connections.source
-    )
-    preview.value = planMediaBridgePreview({
-      source: sourceResult.bundle,
-      destination: destinationResult.bundle,
-      scopes: requestedScopes,
-      mappingIssues
-    })
-    providerIssues.value = [...sourceResult.issues, ...destinationResult.issues]
+    const prepared = await preparePlan(sourceConnection, destinationConnection, requestedScopes)
+    preview.value = prepared.plan
+    providerIssues.value = prepared.issues
     previewSignature.value = currentSignature.value
     previewPage.value = 1
-    appendLog(`Preview ready: ${transferCount.value} changes, ${preview.value.stats.skipped} mapping skips.`)
-    statusMessage.value = `${transferCount.value} changes ready to review.`
+    const changes = planTransferCount(prepared.plan)
+    appendLog(`Preview ready: ${changes} changes, ${prepared.plan.stats.skipped} mapping skips.`)
+    statusMessage.value = `${changes} changes ready to review.`
   } catch (error: any) {
     preview.value = null
     previewSignature.value = ''
@@ -625,34 +685,56 @@ function mutableTransfer(plan: MediaBridgePreviewPlan): CanonicalBundle {
 }
 
 async function runSync() {
-  if (!canSync.value || !preview.value || !connections.destination) return
-  // A reviewed plan is single-use. Append-only providers can create duplicate
-  // history if the same frozen preview is submitted twice, and a failed write
-  // may still have partially succeeded. Any retry must compare fresh state.
+  if (!canSync.value || !connections.source || !connections.destination) return
+  const sourceConnection = connections.source
+  const destinationConnection = connections.destination
+  const requestedScopes = { ...scopes }
   previewSignature.value = ''
   actionBusy.value = 'sync'
   globalError.value = ''
   syncResult.value = null
-  statusMessage.value = copy.value.syncing
-  appendLog(`Writing reviewed changes to ${SERVICE_DEFINITIONS[connections.destination.service].label}...`)
+  providerIssues.value = []
+  preview.value = null
+  activity.value = []
+  statusMessage.value = copy.value.preparingSync
+  openSyncView()
+  appendLog(`Comparing source and destination for ${routeName.value}...`)
   try {
-    const transfer = mutableTransfer(preview.value)
+    // Build a fresh plan for every run. This makes preview optional and avoids
+    // reusing stale writes on providers whose history endpoints are append-only.
+    const prepared = await preparePlan(sourceConnection, destinationConnection, requestedScopes)
+    providerIssues.value = prepared.issues
+    const transfer = mutableTransfer(prepared.plan)
+    const changes = planTransferCount(prepared.plan)
+    appendLog(`Comparison complete: ${changes} changes are ready.`)
+    if (changes === 0) {
+      syncResult.value = {
+        written: { history: 0, progress: 0, library: 0 },
+        issues: []
+      }
+      statusMessage.value = copy.value.noChanges
+      return
+    }
+
+    statusMessage.value = copy.value.syncing
+    appendLog(`Writing changes to ${SERVICE_DEFINITIONS[destinationConnection.service].label}...`)
     const result = await pushMediaBridge({
-      connection: connections.destination,
+      connection: destinationConnection,
       bundle: transfer,
-      scopes: { ...scopes },
+      scopes: requestedScopes,
       log: appendLog
     })
     appendLog('Reading the destination once more for verification...')
+    statusMessage.value = copy.value.verifyingSync
     const verified = await pullMediaBridge({
-      connection: connections.destination,
-      scopes: { ...scopes },
+      connection: destinationConnection,
+      scopes: requestedScopes,
       log: appendLog
     })
     const remaining = planMediaBridgePreview({
       source: transfer,
       destination: verified.bundle,
-      scopes: { ...scopes }
+      scopes: requestedScopes
     })
     for (const scope of ['history', 'progress', 'library'] as const) {
       // Provider sync endpoints can return HTTP success with per-item misses.
@@ -677,7 +759,7 @@ async function runSync() {
   } catch (error: any) {
     globalError.value = error.message
     appendLog(`Sync failed: ${error.message}`)
-    statusMessage.value = 'Sync failed.'
+    statusMessage.value = copy.value.syncFailed
   } finally {
     actionBusy.value = null
   }
@@ -697,6 +779,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   componentMounted = false
+  restoreDocumentScroll()
   connectionAttempt.source++
   connectionAttempt.destination++
   stremioLinkAttempt.source++
@@ -973,13 +1056,13 @@ onBeforeUnmount(() => {
         </section>
 
         <div class="bridge-actions">
-          <button type="button" class="secondary-button" :disabled="!canPreview" @click="buildPreview">
-            <span v-if="actionBusy === 'preview'" class="spinner" aria-hidden="true"></span>
-            {{ actionBusy === 'preview' ? copy.previewing : copy.preview }}
-          </button>
           <button type="button" class="primary-button" :disabled="!canSync" @click="runSync">
             <span v-if="actionBusy === 'sync'" class="spinner" aria-hidden="true"></span>
             {{ actionBusy === 'sync' ? copy.syncing : `${copy.sync}: ${routeName}` }}
+          </button>
+          <button type="button" class="secondary-button" :disabled="!canPreview" @click="buildPreview">
+            <span v-if="actionBusy === 'preview'" class="spinner" aria-hidden="true"></span>
+            {{ actionBusy === 'preview' ? copy.previewing : copy.preview }}
           </button>
           <button v-if="preview" type="button" class="text-button" :disabled="Boolean(actionBusy)" @click="clearPreview">{{ copy.reset }}</button>
         </div>
@@ -1060,6 +1143,80 @@ onBeforeUnmount(() => {
         <p class="sr-only" aria-live="polite">{{ statusMessage }}</p>
       </div>
     </section>
+
+    <Teleport to="body">
+      <div
+        v-if="syncViewOpen"
+        ref="syncView"
+        class="sync-run-screen"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="sync-run-title"
+        tabindex="-1"
+        @keydown.esc="closeSyncView"
+      >
+        <header class="sync-run-header">
+          <span class="bridge-brand">
+            <img :src="withBase('/tools_icon_coloured.webp')" class="bridge-logo" alt="" aria-hidden="true" />
+            <span>{{ copy.title }}</span>
+          </span>
+          <span class="route-badge">{{ routeName }}</span>
+          <button
+            v-if="actionBusy !== 'sync'"
+            type="button"
+            class="sync-run-close"
+            @click="closeSyncView"
+          >
+            {{ copy.backToBridge }}
+          </button>
+        </header>
+
+        <main class="sync-run-main">
+          <div v-if="actionBusy === 'sync'" class="sync-run-state" aria-live="polite">
+            <span class="sync-run-spinner" aria-hidden="true"></span>
+            <span class="eyebrow">{{ copy.sync }}</span>
+            <h2 id="sync-run-title">{{ statusMessage }}</h2>
+            <p>{{ copy.keepOpen }}</p>
+            <div class="sync-run-activity">
+              <span class="sync-run-pulse" aria-hidden="true"></span>
+              <span>{{ latestActivity }}</span>
+            </div>
+          </div>
+
+          <div v-else-if="syncResult" class="sync-run-state sync-run-finished" aria-live="polite">
+            <span :class="['sync-run-check', { 'has-warnings': syncHasWarnings }]" aria-hidden="true">
+              {{ syncHasWarnings ? '!' : '✓' }}
+            </span>
+            <span class="eyebrow">{{ routeName }}</span>
+            <h2 id="sync-run-title">{{ statusMessage }}</h2>
+            <p class="sync-run-counts">
+              {{ syncResult.written.history }} {{ copy.historyUnit }} ·
+              {{ syncResult.written.progress }} {{ copy.progressUnit }} ·
+              {{ syncResult.written.library }} {{ copy.savedTitlesUnit }}
+            </p>
+            <div class="sync-support-card">
+              <p>{{ copy.supportMessage }}</p>
+              <a
+                class="kofi-button"
+                href="https://ko-fi.com/haaihond"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <span aria-hidden="true">☕</span>
+                {{ copy.supportButton }}
+              </a>
+            </div>
+          </div>
+
+          <div v-else class="sync-run-state sync-run-failed" role="alert">
+            <span class="sync-run-check is-error" aria-hidden="true">!</span>
+            <span class="eyebrow">{{ routeName }}</span>
+            <h2 id="sync-run-title">{{ copy.syncFailed }}</h2>
+            <p>{{ globalError }}</p>
+          </div>
+        </main>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -1311,6 +1468,175 @@ td strong { color: var(--vp-c-text-1); font-weight: 650; }
 .activity-panel summary span { margin-left: 5px; color: #858b9b; }
 .activity-panel pre { max-height: 260px; overflow: auto; margin: 0; padding: 13px 14px; border-top: 1px solid #252936; background: #090b0f; color: #aeb5c6; font: 10px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
 
+.sync-run-screen {
+  --bridge-radius: 14px;
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow: auto;
+  background:
+    radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--vp-c-brand-soft) 70%, transparent) 0, transparent 42%),
+    var(--vp-c-bg);
+  color: var(--vp-c-text-1);
+  outline: none;
+}
+
+.sync-run-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 20px;
+  min-height: 76px;
+  padding: 14px 28px;
+  border-bottom: 1px solid var(--vp-c-divider);
+  background: color-mix(in srgb, var(--vp-c-bg) 88%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.sync-run-header .route-badge { grid-column: 2; }
+.sync-run-close {
+  grid-column: 3;
+  justify-self: end;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  background: var(--vp-c-bg);
+  color: var(--vp-c-text-1);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.sync-run-main {
+  display: flex;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 44px 24px 64px;
+}
+
+.sync-run-state {
+  display: flex;
+  width: min(760px, 100%);
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.sync-run-state h2 {
+  max-width: 680px;
+  margin: 10px 0 0;
+  border: 0;
+  color: var(--vp-c-text-1);
+  font-size: clamp(28px, 5vw, 52px);
+  line-height: 1.08;
+  letter-spacing: -.035em;
+}
+
+.sync-run-state > p {
+  max-width: 620px;
+  margin: 16px 0 0;
+  color: var(--vp-c-text-2);
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.sync-run-spinner {
+  width: 58px;
+  height: 58px;
+  margin-bottom: 24px;
+  border: 4px solid color-mix(in srgb, var(--vp-c-brand-1) 22%, var(--vp-c-divider));
+  border-top-color: var(--vp-c-brand-1);
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
+
+.sync-run-activity {
+  display: flex;
+  width: min(640px, 100%);
+  align-items: flex-start;
+  gap: 11px;
+  margin-top: 34px;
+  padding: 15px 17px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--vp-c-bg-alt) 88%, transparent);
+  color: var(--vp-c-text-2);
+  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-align: left;
+}
+
+.sync-run-pulse {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--vp-c-brand-1);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--vp-c-brand-1) 45%, transparent);
+  animation: sync-pulse 1.8s ease-out infinite;
+}
+
+.sync-run-check {
+  display: grid;
+  width: 72px;
+  height: 72px;
+  place-items: center;
+  margin-bottom: 24px;
+  border-radius: 50%;
+  background: var(--vp-c-green-1);
+  color: white;
+  box-shadow: 0 16px 40px color-mix(in srgb, var(--vp-c-green-1) 30%, transparent);
+  font-size: 34px;
+  font-weight: 800;
+}
+
+.sync-run-check.has-warnings { background: var(--vp-c-warning-1); box-shadow: 0 16px 40px color-mix(in srgb, var(--vp-c-warning-1) 28%, transparent); }
+.sync-run-check.is-error { background: var(--vp-c-danger-1); box-shadow: 0 16px 40px color-mix(in srgb, var(--vp-c-danger-1) 28%, transparent); }
+.sync-run-counts { font-weight: 600; }
+
+.sync-support-card {
+  width: min(660px, 100%);
+  margin-top: 34px;
+  padding: 26px;
+  border: 1px solid color-mix(in srgb, var(--vp-c-brand-1) 28%, var(--vp-c-divider));
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--vp-c-brand-soft) 55%, var(--vp-c-bg));
+}
+
+.sync-support-card p {
+  margin: 0;
+  color: var(--vp-c-text-1);
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.55;
+}
+
+.kofi-button {
+  display: inline-flex;
+  min-height: 46px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 18px;
+  padding: 0 19px;
+  border-radius: 9px;
+  background: #ff5e5b;
+  color: white !important;
+  font-size: 14px;
+  font-weight: 750;
+  text-decoration: none !important;
+  box-shadow: 0 10px 26px rgb(255 94 91 / 24%);
+}
+
+.kofi-button:hover { background: #e84e4b; }
+
 .sr-only { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
 
 button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible, .scope-option:has(input:focus-visible) {
@@ -1319,6 +1645,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }
+@keyframes sync-pulse {
+  70%, 100% { box-shadow: 0 0 0 9px transparent; }
+}
 
 @media (max-width: 900px) {
   .route-builder { grid-template-columns: 1fr; }
@@ -1339,6 +1668,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
   .bridge-actions button { width: 100%; }
   .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .preview-total { display: none; }
+  .sync-run-header { grid-template-columns: 1fr auto; gap: 10px; min-height: 66px; padding: 12px 16px; }
+  .sync-run-header .route-badge { display: none; }
+  .sync-run-close { grid-column: 2; padding: 0 10px; }
+  .sync-run-main { padding: 32px 16px 48px; }
+  .sync-run-state h2 { font-size: 32px; }
+  .sync-support-card { padding: 22px 17px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
