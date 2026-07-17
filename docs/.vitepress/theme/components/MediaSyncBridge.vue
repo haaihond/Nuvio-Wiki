@@ -99,8 +99,8 @@ const copy = computed(() => isDutch.value ? {
   page: 'Pagina',
   activity: 'Activiteit',
   result: 'Synchronisatie voltooid',
-  resultWarnings: 'Synchronisatie voltooid met waarschuwingen',
-  finishedWarnings: 'Synchronisatie voltooid met waarschuwingen.',
+  resultWarnings: 'Synchronisatie voltooid met meldingen',
+  finishedWarnings: 'Synchronisatie voltooid met meldingen.',
   secure: 'Inloggegevens blijven alleen in dit tabblad; OAuth-geheimen blijven op de server.',
   caveat: 'De nieuwste bekeken status wordt verplaatst; afzonderlijke herhaalde afspeelbeurten worden samengevoegd. Trakt-collecties worden opgeslagen titels; benoemde lijsten en beoordelingen blijven bij hun eigen dienst.',
   setupStopped: 'Instellen gestopt',
@@ -121,7 +121,12 @@ const copy = computed(() => isDutch.value ? {
   keepOpen: 'Laat deze pagina open terwijl je gegevens worden vergeleken, geschreven en gecontroleerd.',
   syncFailed: 'Synchronisatie mislukt',
   backToBridge: 'Terug naar Sync Bridge',
-  supportMessage: 'If this helped you out or saved you some time consider supporting me ❤️',
+  syncNotes: 'Synchronisatiemeldingen',
+  syncNotesIntro: 'De synchronisatie is voltooid. Deze meldingen leggen uit welke items zijn overgeslagen of niet konden worden gecontroleerd.',
+  note: 'melding',
+  notes: 'meldingen',
+  moreAffected: 'meer',
+  supportMessage: 'If this helped you out or saved you some time, consider supporting me. ❤️',
   supportButton: 'Support me on Ko-fi'
 } : {
   title: 'Nuvio Sync Bridge',
@@ -167,8 +172,8 @@ const copy = computed(() => isDutch.value ? {
   page: 'Page',
   activity: 'Activity',
   result: 'Sync complete',
-  resultWarnings: 'Sync finished with warnings',
-  finishedWarnings: 'Sync finished with warnings.',
+  resultWarnings: 'Sync complete with notes',
+  finishedWarnings: 'Sync complete with notes.',
   secure: 'Credentials stay in this tab; OAuth secrets remain on the server.',
   caveat: 'The latest watched state is transferred; individual replay events are collapsed. Trakt collections become saved titles; named lists and ratings stay provider-native.',
   setupStopped: 'Setup stopped',
@@ -189,7 +194,12 @@ const copy = computed(() => isDutch.value ? {
   keepOpen: 'Keep this page open while your data is compared, written, and verified.',
   syncFailed: 'Sync failed',
   backToBridge: 'Back to Sync Bridge',
-  supportMessage: 'If this helped you out or saved you some time consider supporting me ❤️',
+  syncNotes: 'Sync notes',
+  syncNotesIntro: 'The sync completed. These notes explain items that were skipped or could not be verified.',
+  note: 'note',
+  notes: 'notes',
+  moreAffected: 'more',
+  supportMessage: 'If this helped you out or saved you some time, consider supporting me. ❤️',
   supportButton: 'Support me on Ko-fi'
 })
 
@@ -272,6 +282,27 @@ const canPreview = computed(() => (
 ))
 const canSync = computed(() => canPreview.value)
 const syncHasWarnings = computed(() => Boolean(syncResult.value && providerIssues.value.length))
+const finishedIssueGroups = computed(() => {
+  const groups = new Map<string, BridgeIssue & { count: number; mediaLabels: string[] }>()
+  for (const issue of providerIssues.value) {
+    const key = `${issue.scope}\u0000${issue.status}\u0000${issue.reason}`
+    const existing = groups.get(key)
+    const mediaLabel = formatIssueMedia(issue)
+    if (existing) {
+      existing.count++
+      if (mediaLabel && existing.mediaLabels.length < 3 && !existing.mediaLabels.includes(mediaLabel)) {
+        existing.mediaLabels.push(mediaLabel)
+      }
+      continue
+    }
+    groups.set(key, {
+      ...issue,
+      count: 1,
+      mediaLabels: mediaLabel ? [mediaLabel] : []
+    })
+  }
+  return [...groups.values()]
+})
 const latestActivity = computed(() => activity.value[activity.value.length - 1] || statusMessage.value)
 const previewRows = computed(() => {
   const start = (previewPage.value - 1) * previewPageSize
@@ -769,6 +800,16 @@ function formatScope(scope: string) {
   return ({ history: copy.value.history, progress: copy.value.progress, library: copy.value.library } as Record<string, string>)[scope] || scope
 }
 
+function formatIssueMedia(issue: BridgeIssue) {
+  const media = issue.media
+  if (!media?.title) return ''
+  const episode = Number.isInteger(media.season) && Number.isInteger(media.episode)
+    ? ` S${media.season}E${media.episode}`
+    : ''
+  const year = media.year ? ` (${media.year})` : ''
+  return `${media.title}${year}${episode}`
+}
+
 function outcomeClass(outcome: string) {
   return `outcome-${outcome}`
 }
@@ -1185,7 +1226,8 @@ onBeforeUnmount(() => {
 
           <div v-else-if="syncResult" class="sync-run-state sync-run-finished" aria-live="polite">
             <span :class="['sync-run-check', { 'has-warnings': syncHasWarnings }]" aria-hidden="true">
-              {{ syncHasWarnings ? '!' : '✓' }}
+              ✓
+              <span v-if="syncHasWarnings" class="sync-run-note-badge">i</span>
             </span>
             <span class="eyebrow">{{ routeName }}</span>
             <h2 id="sync-run-title">{{ statusMessage }}</h2>
@@ -1194,6 +1236,36 @@ onBeforeUnmount(() => {
               {{ syncResult.written.progress }} {{ copy.progressUnit }} ·
               {{ syncResult.written.library }} {{ copy.savedTitlesUnit }}
             </p>
+            <section
+              v-if="syncHasWarnings"
+              class="sync-run-notes"
+              aria-labelledby="sync-run-notes-title"
+            >
+              <div class="sync-run-notes-heading">
+                <div>
+                  <h3 id="sync-run-notes-title">{{ copy.syncNotes }}</h3>
+                  <p>{{ copy.syncNotesIntro }}</p>
+                </div>
+                <span class="sync-run-notes-count">
+                  {{ providerIssues.length }} {{ providerIssues.length === 1 ? copy.note : copy.notes }}
+                </span>
+              </div>
+              <ul class="sync-run-note-list">
+                <li
+                  v-for="(issue, index) in finishedIssueGroups"
+                  :key="`${issue.scope}-${issue.status}-${index}`"
+                >
+                  <span class="sync-run-note-scope">{{ formatScope(issue.scope) }}</span>
+                  <div>
+                    <p>{{ issue.reason }}</p>
+                    <small v-if="issue.mediaLabels.length">
+                      {{ issue.mediaLabels.join(' · ') }}<template v-if="issue.count > issue.mediaLabels.length"> · +{{ issue.count - issue.mediaLabels.length }} {{ copy.moreAffected }}</template>
+                    </small>
+                  </div>
+                  <span v-if="issue.count > 1" class="sync-run-note-repeat">×{{ issue.count }}</span>
+                </li>
+              </ul>
+            </section>
             <div class="sync-support-card">
               <p>{{ copy.supportMessage }}</p>
               <a
@@ -1584,6 +1656,7 @@ td strong { color: var(--vp-c-text-1); font-weight: 650; }
 }
 
 .sync-run-check {
+  position: relative;
   display: grid;
   width: 72px;
   height: 72px;
@@ -1597,9 +1670,117 @@ td strong { color: var(--vp-c-text-1); font-weight: 650; }
   font-weight: 800;
 }
 
-.sync-run-check.has-warnings { background: var(--vp-c-warning-1); box-shadow: 0 16px 40px color-mix(in srgb, var(--vp-c-warning-1) 28%, transparent); }
+.sync-run-check.has-warnings { background: var(--vp-c-green-1); box-shadow: 0 16px 40px color-mix(in srgb, var(--vp-c-green-1) 24%, transparent); }
+.sync-run-note-badge {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  display: grid;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  border: 3px solid var(--vp-c-bg);
+  border-radius: 50%;
+  background: var(--vp-c-warning-1);
+  color: white;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+}
 .sync-run-check.is-error { background: var(--vp-c-danger-1); box-shadow: 0 16px 40px color-mix(in srgb, var(--vp-c-danger-1) 28%, transparent); }
 .sync-run-counts { font-weight: 600; }
+
+.sync-run-notes {
+  width: min(660px, 100%);
+  margin-top: 26px;
+  overflow: hidden;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--vp-c-bg-alt) 82%, var(--vp-c-bg));
+  text-align: left;
+}
+
+.sync-run-notes-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 17px 18px 15px;
+}
+
+.sync-run-notes-heading h3 {
+  margin: 0;
+  border: 0;
+  color: var(--vp-c-text-1);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.sync-run-notes-heading p {
+  margin: 4px 0 0;
+  color: var(--vp-c-text-2);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.sync-run-notes-count,
+.sync-run-note-repeat {
+  flex: none;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 999px;
+  background: var(--vp-c-bg);
+  color: var(--vp-c-text-2);
+  font-size: 10px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.sync-run-notes-count { padding: 5px 8px; }
+
+.sync-run-note-list {
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0 18px 16px;
+  list-style: none;
+  scrollbar-gutter: stable;
+}
+
+.sync-run-note-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  padding: 11px 0;
+  border-top: 1px solid var(--vp-c-divider);
+}
+
+.sync-run-note-list p {
+  margin: 0;
+  color: var(--vp-c-text-2);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.sync-run-note-list small {
+  display: block;
+  margin-top: 4px;
+  color: var(--vp-c-text-3);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.sync-run-note-scope {
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: var(--vp-c-default-soft);
+  color: var(--vp-c-text-2);
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.sync-run-note-repeat { padding: 3px 6px; }
 
 .sync-support-card {
   width: min(660px, 100%);
@@ -1673,6 +1854,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
   .sync-run-close { grid-column: 2; padding: 0 10px; }
   .sync-run-main { padding: 32px 16px 48px; }
   .sync-run-state h2 { font-size: 32px; }
+  .sync-run-notes-heading { flex-direction: column; gap: 10px; }
+  .sync-run-note-list { max-height: 190px; }
+  .sync-run-note-list li { grid-template-columns: minmax(0, 1fr) auto; }
+  .sync-run-note-scope { grid-column: 1 / -1; justify-self: start; }
   .sync-support-card { padding: 22px 17px; }
 }
 
