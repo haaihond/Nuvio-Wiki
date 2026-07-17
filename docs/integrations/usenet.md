@@ -36,7 +36,7 @@ I won't choose an indexer for you. For choosing one, I refer you to [this](https
 
 ### Step 3: Configure your indexer
 1. Proceed to the **addons** section and in the **marketplace** search for **Newznab**. 
-2. Add your indexer **API key** and configure the settings to your liking (check out [this](https://gist.github.com/QINGCHARLES/307a7782dec86ff73a1f2b5b9c8f6c12) page if you don't have an indexer yet). I highly recommend switching the search mode setting to auto. This will return far more streams, but it results in two api hits per indexer so don't turn it on when you are tight on api hits.
+2. Add your indexer **API key** and configure the settings to your liking (check out [this](https://gist.github.com/QINGCHARLES/307a7782dec86ff73a1f2b5b9c8f6c12) page if you don't have an indexer yet). I highly recommend switching the search mode setting to `both`. This will return far more streams, but it results in two api hits per indexer so don't turn it on when you are tight on api hits.
 3. You can add as many **Newznab** instances. Each one per indexer, which is recommended to get greater coverage.
 
 ---
