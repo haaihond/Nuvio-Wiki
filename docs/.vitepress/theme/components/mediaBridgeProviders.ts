@@ -14,17 +14,18 @@ import {
   type ProgressRecord,
   type ServiceId,
   type SyncScopes
-} from './mediaBridgeCore'
+} from './mediaBridgeCore.ts'
 import {
   mergeStremioWatchedVideoIds,
   readStremioWatchedVideoIds
-} from './stremioWatched'
+} from './stremioWatched.ts'
 
 const TRAKT_API = 'https://api.trakt.tv'
 const SIMKL_API = 'https://api.simkl.com'
 const STREMIO_API = 'https://api.strem.io/api'
 const CINEMETA_API = 'https://v3-cinemeta.strem.io'
 const NUVIO_API = 'https://api.nuvio.tv'
+const TRAKT_MAX_RESUME_PROGRESS = 79
 
 const SIMKL_EXTERNAL_ID_NAMESPACES = [
   'mal',
@@ -1004,8 +1005,22 @@ async function pushTrakt(options: PushOptions): Promise<PushResult> {
         issues.push({ scope: 'progress', status: 'unresolved', media: record.media, reason: 'Trakt progress needs a valid percentage or absolute position.' })
         continue
       }
+      if (percentage >= 80) {
+        // Trakt treats 80% and above as completed and no longer accepts it as
+        // playback state. Do not call /scrobble/stop because that would turn a
+        // progress-only transfer into a new watch-history event.
+        issues.push({
+          scope: 'progress',
+          status: 'unresolved',
+          media: record.media,
+          reason: 'Trakt cannot store resume points at 80% or higher; it treats them as watched. Transfer watch history to preserve the completed state.'
+        })
+        continue
+      }
       const payload: any = {
-        progress: Math.max(1, Math.min(99, Math.round(percentage))),
+        // /scrobble/stop returns a paused playback record from 1% through 79%.
+        // Cap after rounding so a 79.x% source never crosses into a scrobble.
+        progress: Math.max(1, Math.min(TRAKT_MAX_RESUME_PROGRESS, Math.round(percentage))),
         app_version: '2.0',
         app_date: new Date(record.updatedAt).toISOString().slice(0, 10)
       }
@@ -1053,8 +1068,21 @@ async function pushTrakt(options: PushOptions): Promise<PushResult> {
         issues.push({ scope: 'progress', status: 'unresolved', media: record.media, reason: 'The Trakt episode progress record has no season and episode number.' })
         continue
       }
-      await traktRequest(connection, '/scrobble/pause', {}, { method: 'POST', body: JSON.stringify(payload) })
-      written.progress++
+      try {
+        await traktRequest(connection, '/scrobble/stop', {}, { method: 'POST', body: JSON.stringify(payload) })
+        written.progress++
+      } catch (error: any) {
+        // Validation failures are specific to this media record. Keep writing
+        // the rest of the transfer instead of failing after earlier scopes
+        // have already committed successfully.
+        if (error?.status !== 422) throw error
+        issues.push({
+          scope: 'progress',
+          status: 'unresolved',
+          media: record.media,
+          reason: `Trakt rejected this resume point: ${errorDetail(error.body, error.message)}`
+        })
+      }
     }
     logTo(log, `Updated ${written.progress} Trakt resume points.`)
   }
