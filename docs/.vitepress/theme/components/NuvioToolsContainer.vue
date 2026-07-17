@@ -58,7 +58,7 @@ const tabs: ToolTab[] = [
     label: 'Sync Bridge',
     description: 'Sync Simkl, Stremio, Trakt, and Nuvio.',
     title: 'Sync Bridge',
-    details: 'Preview and transfer watched history, playback progress, watchlists, and collections in any direction between Simkl, Stremio, Trakt, and Nuvio—including different accounts or profiles on the same service.',
+    details: 'Preview and transfer watched history, playback progress, watchlists, and collections in any direction between Simkl, Stremio, Trakt, and Nuvio—including different accounts or profiles on the same service. All sync logic runs in your browser, and The Sync Bridge never stores your passwords or other account secrets.',
     component: markRaw(defineAsyncComponent(() => import('./NuvioTraktBridge.vue'))),
     props: { defaultExpanded: true, hideTip: true, hideHeader: true },
     workspace: true,

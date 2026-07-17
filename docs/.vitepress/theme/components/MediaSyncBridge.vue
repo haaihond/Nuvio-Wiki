@@ -103,7 +103,8 @@ const copy = computed(() => isDutch.value ? {
   result: 'Synchronisatie voltooid',
   resultWarnings: 'Synchronisatie voltooid met meldingen',
   finishedWarnings: 'Synchronisatie voltooid met meldingen.',
-  secure: 'Inloggegevens blijven alleen in dit tabblad; OAuth-geheimen blijven op de server.',
+  secureShort: 'Synchronisatie draait lokaal in je browser',
+  secure: 'Alle vergelijkings- en synchronisatielogica draait lokaal in dit browsertabblad. De Sync Bridge slaat je wachtwoorden, verbindingstokens en gesynchroniseerde gegevens nooit op; wachtwoorden gaan rechtstreeks naar de dienst waarbij je inlogt.',
   caveat: 'De nieuwste bekeken status wordt verplaatst; afzonderlijke herhaalde afspeelbeurten worden samengevoegd. Trakt-collecties worden opgeslagen titels; benoemde lijsten en beoordelingen blijven bij hun eigen dienst.',
   setupStopped: 'Instellen gestopt',
   noChanges: 'Er zijn geen nieuwe of nieuwere items om te synchroniseren.',
@@ -176,7 +177,8 @@ const copy = computed(() => isDutch.value ? {
   result: 'Sync complete',
   resultWarnings: 'Sync complete with notes',
   finishedWarnings: 'Sync complete with notes.',
-  secure: 'Credentials stay in this tab; OAuth secrets remain on the server.',
+  secureShort: 'Sync runs locally in your browser',
+  secure: 'All comparison and sync logic runs locally in this browser tab. The Sync Bridge never stores your passwords, connection tokens, or synced data; passwords go directly to the service you sign in to.',
   caveat: 'The latest watched state is transferred; individual replay events are collapsed. Trakt collections become saved titles; named lists and ratings stay provider-native.',
   setupStopped: 'Setup stopped',
   noChanges: 'There are no new or newer items to sync.',
@@ -881,7 +883,7 @@ onBeforeUnmount(() => {
           <span>{{ copy.title }}</span>
         </span>
         <span class="header-meta">
-          <span v-if="!isCollapsed" class="secure-note">{{ copy.secure }}</span>
+          <span v-if="!isCollapsed" class="secure-note">{{ copy.secureShort }}</span>
           <svg viewBox="0 0 20 20" aria-hidden="true" :class="['header-arrow', { rotated: !isCollapsed }]">
             <path d="m6 8 4 4 4-4" />
           </svg>
@@ -895,6 +897,11 @@ onBeforeUnmount(() => {
           </div>
           <span class="route-badge">{{ routeName }}</span>
         </div>
+
+        <p class="security-line">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8V6a5 5 0 0 1 10 0v2" /><rect x="3" y="8" width="14" height="10" rx="3" /></svg>
+          {{ copy.secure }}
+        </p>
 
         <div v-if="globalError" class="error-panel" role="alert">
           <span class="error-mark" aria-hidden="true">!</span>
@@ -1128,11 +1135,6 @@ onBeforeUnmount(() => {
           </button>
           <button v-if="preview" type="button" class="text-button" :disabled="Boolean(actionBusy)" @click="clearPreview">{{ copy.reset }}</button>
         </div>
-
-        <p class="security-line">
-          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8V6a5 5 0 0 1 10 0v2" /><rect x="3" y="8" width="14" height="10" rx="3" /></svg>
-          {{ copy.secure }}
-        </p>
 
         <section v-if="preview" class="preview-panel" aria-labelledby="preview-title">
           <div class="preview-heading">
@@ -1515,8 +1517,18 @@ button:disabled { opacity: .48; cursor: not-allowed; }
 .bridge-actions { display: flex; align-items: center; gap: 12px; margin-top: 24px; }
 .bridge-actions .primary-button { min-width: 190px; }
 .spinner { display: inline-block; width: 12px; height: 12px; margin-right: 6px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; vertical-align: -2px; animation: spin .7s linear infinite; }
-.security-line { gap: 7px; margin: 13px 0 0; color: var(--vp-c-text-3); font-size: 11px; }
-.security-line svg { width: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; }
+.security-line {
+  gap: 10px;
+  margin: 0 0 22px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--vp-c-brand-1) 28%, var(--vp-c-divider));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--vp-c-brand-soft) 55%, transparent);
+  color: var(--vp-c-text-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.security-line svg { flex: none; width: 18px; fill: none; stroke: var(--vp-c-brand-1); stroke-width: 1.7; }
 
 .preview-panel { margin-top: 20px; padding: 18px; }
 .preview-heading { justify-content: space-between; gap: 14px; margin-bottom: 14px; }
