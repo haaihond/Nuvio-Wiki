@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title>Plex</title>
+  <rect width="64" height="64" rx="12" fill="#161616"/>
+  <path fill="#e5a00d" d="M27 12h10l14 20-14 20H27l14-20z"/>
+  <path fill="#f5f5f5" d="M13 12h10l14 20-14 20H13l14-20z" opacity=".96"/>
+</svg>

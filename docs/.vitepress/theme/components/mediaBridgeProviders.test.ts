@@ -54,6 +54,28 @@ function stremioConnection(): BridgeConnection {
   }
 }
 
+function plexConnection(slot: 'source' | 'destination' = 'destination'): BridgeConnection {
+  return {
+    slot,
+    service: 'plex',
+    accountId: 'plex-user',
+    serverId: 'plex-server',
+    displayName: 'Plex User · Test Server',
+    credentials: {
+      service: 'plex',
+      accountToken: 'account-token',
+      clientIdentifier: 'test-client',
+      server: {
+        id: 'plex-server',
+        name: 'Test Server',
+        baseUrl: 'https://plex.test',
+        accessToken: 'server-token',
+        owned: true
+      }
+    }
+  }
+}
+
 function movieProgress(percentage: number, imdb = 'tt2015381') {
   return {
     media: {
@@ -285,6 +307,196 @@ test('only reports omitted Trakt replay timestamps when Trakt is the source', as
   assert.equal(source.issues.length, 1)
   assert.match(source.issues[0].reason, /2 earlier play events cannot be transferred/)
   assert.deepEqual(destination.issues, [])
+})
+
+test('reads watched state, resume points, and server-library membership from Plex', async t => {
+  t.mock.method(globalThis, 'fetch', async input => {
+    const url = new URL(String(input))
+    if (url.pathname === '/library/sections') {
+      return Response.json({
+        MediaContainer: {
+          Directory: [{ key: '1', title: 'Movies', type: 'movie' }]
+        }
+      })
+    }
+    if (url.pathname === '/library/sections/1/all') {
+      return Response.json({
+        MediaContainer: {
+          totalSize: 1,
+          Metadata: [{
+            ratingKey: '101',
+            key: '/library/metadata/101',
+            guid: 'plex://movie/movie-101',
+            Guid: [{ id: 'imdb://tt2015381' }, { id: 'tmdb://118340' }],
+            type: 'movie',
+            title: 'Guardians of the Galaxy',
+            year: 2014,
+            addedAt: 1_700_000_000,
+            updatedAt: 1_710_000_000,
+            lastViewedAt: 1_720_000_000,
+            viewCount: 2,
+            viewOffset: 1_200_000,
+            duration: 7_200_000
+          }]
+        }
+      })
+    }
+    throw new Error(`Unexpected Plex request: ${url}`)
+  })
+
+  const result = await pullMediaBridge({
+    connection: plexConnection('source'),
+    scopes: { history: true, progress: true, library: true }
+  })
+
+  assert.equal(result.bundle.history.length, 1)
+  assert.equal(result.bundle.history[0].playCount, 2)
+  assert.equal(result.bundle.history[0].media.ids.imdb, 'tt2015381')
+  assert.equal(result.bundle.progress.length, 1)
+  assert.equal(result.bundle.progress[0].positionMs, 1_200_000)
+  assert.equal(result.bundle.library.length, 1)
+  assert.equal(result.bundle.library[0].lists[0].name, 'Movies')
+})
+
+test('writes Plex watched state and timeline only for media already on the server', async t => {
+  const writes: Array<{ path: string; method: string; params: URLSearchParams }> = []
+  t.mock.method(globalThis, 'fetch', async (input, init) => {
+    const url = new URL(String(input))
+    if (url.pathname === '/library/sections') {
+      return Response.json({
+        MediaContainer: {
+          Directory: [{ key: '1', title: 'Movies', type: 'movie' }]
+        }
+      })
+    }
+    if (url.pathname === '/library/sections/1/all') {
+      return Response.json({
+        MediaContainer: {
+          totalSize: 1,
+          Metadata: [{
+            ratingKey: '101',
+            key: '/library/metadata/101',
+            guid: 'plex://movie/movie-101',
+            Guid: [{ id: 'imdb://tt2015381' }],
+            type: 'movie',
+            title: 'Almost Finished',
+            year: 2024,
+            duration: 7_200_000
+          }]
+        }
+      })
+    }
+    if (url.pathname === '/:/scrobble' || url.pathname === '/:/timeline') {
+      writes.push({
+        path: url.pathname,
+        method: String(init?.method || 'GET'),
+        params: url.searchParams
+      })
+      return Response.json({ MediaContainer: { size: 0 } })
+    }
+    throw new Error(`Unexpected Plex request: ${url}`)
+  })
+
+  const bundle = createEmptyBundle()
+  bundle.history.push(movieHistory('Almost Finished', 'tt2015381', Date.UTC(2026, 6, 17)))
+  bundle.progress.push(movieProgress(50))
+  bundle.library.push({
+    media: { kind: 'movie', ids: { imdb: 'tt9999999' }, title: 'Missing' },
+    addedAt: Date.UTC(2026, 6, 17),
+    lists: [{ service: 'trakt', kind: 'watchlist' }]
+  })
+
+  const result = await pushMediaBridge({
+    connection: plexConnection(),
+    bundle,
+    scopes: { history: true, progress: true, library: true }
+  })
+
+  assert.deepEqual(writes.map(write => [write.path, write.method]), [
+    ['/:/scrobble', 'PUT'],
+    ['/:/timeline', 'POST']
+  ])
+  assert.equal(writes[0].params.get('key'), '101')
+  assert.equal(writes[1].params.get('ratingKey'), '101')
+  assert.equal(writes[1].params.get('time'), '3600000')
+  assert.deepEqual(result.written, { history: 1, progress: 1, library: 0 })
+  assert.equal(result.skipped?.library, 1)
+  assert.deepEqual(result.confirmedScopes, ['history', 'progress'])
+  assert.match(result.issues[0].reason, /read-only/)
+})
+
+test('maps series episodes to Plex rating keys before marking them watched', async t => {
+  let scrobbledKey = ''
+  t.mock.method(globalThis, 'fetch', async (input, init) => {
+    const url = new URL(String(input))
+    if (url.pathname === '/library/sections') {
+      return Response.json({
+        MediaContainer: { Directory: [{ key: '2', title: 'TV', type: 'show' }] }
+      })
+    }
+    if (url.pathname === '/library/sections/2/all' && url.searchParams.get('type') === '2') {
+      return Response.json({
+        MediaContainer: {
+          totalSize: 1,
+          Metadata: [{
+            ratingKey: '200',
+            key: '/library/metadata/200',
+            guid: 'plex://show/show-200',
+            Guid: [{ id: 'imdb://tt0944947' }],
+            title: 'Game of Thrones',
+            year: 2011
+          }]
+        }
+      })
+    }
+    if (url.pathname === '/library/sections/2/all' && url.searchParams.get('type') === '4') {
+      return Response.json({
+        MediaContainer: {
+          totalSize: 1,
+          Metadata: [{
+            ratingKey: '203',
+            key: '/library/metadata/203',
+            grandparentRatingKey: '200',
+            grandparentTitle: 'Game of Thrones',
+            parentIndex: 2,
+            index: 3,
+            title: 'What Is Dead May Never Die'
+          }]
+        }
+      })
+    }
+    if (url.pathname === '/:/scrobble') {
+      assert.equal(init?.method, 'PUT')
+      scrobbledKey = String(url.searchParams.get('key'))
+      return Response.json({ MediaContainer: { size: 0 } })
+    }
+    throw new Error(`Unexpected Plex request: ${url}`)
+  })
+
+  const bundle = createEmptyBundle()
+  bundle.history.push({
+    media: {
+      kind: 'series',
+      ids: { imdb: 'tt0944947' },
+      title: 'Game of Thrones',
+      year: 2011,
+      season: 2,
+      episode: 3,
+      episodeTitle: 'What Is Dead May Never Die'
+    },
+    watchedAt: Date.UTC(2026, 6, 17),
+    playCount: 1
+  })
+
+  const result = await pushMediaBridge({
+    connection: plexConnection(),
+    bundle,
+    scopes: { history: true, progress: false, library: false }
+  })
+
+  assert.equal(scrobbledKey, '203')
+  assert.equal(result.written.history, 1)
+  assert.deepEqual(result.issues, [])
 })
 
 test('imports Simkl resume points sequentially through pause within one 30-second budget', async t => {

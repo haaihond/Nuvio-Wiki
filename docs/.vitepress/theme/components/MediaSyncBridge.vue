@@ -13,6 +13,7 @@ import {
   SERVICE_IDS,
   endpointFingerprint,
   routeLabel,
+  summarizeScopes,
   validateEndpointPair,
   type BridgeSlot,
   type CanonicalBundle,
@@ -26,6 +27,8 @@ import {
 import {
   createMediaBridgeVerificationCheckpoint,
   createNuvioConnection,
+  createPlexConnection,
+  createPlexPinLink,
   createStremioDeviceLink,
   createStremioLinkedConnection,
   createStremioConnection,
@@ -34,11 +37,15 @@ import {
   pullMediaBridge,
   pullMediaBridgeForVerification,
   pushMediaBridge,
+  readPlexPinLink,
   readStremioDeviceLink,
   signInNuvio,
+  signInPlex,
   signInStremio,
+  selectPlexServer,
   type BridgeConnection,
   type BridgeIssue,
+  type PlexPinLink,
   type PushResult,
   type SimklCredentials,
   type StremioDeviceLink,
@@ -59,7 +66,7 @@ const { lang } = useData()
 const isDutch = computed(() => String(lang.value || '').startsWith('nl'))
 const copy = computed(() => isDutch.value ? {
   title: 'Sync Bridge',
-  subtitle: 'Verplaats kijkgeschiedenis, voortgang en opgeslagen titels tussen Simkl, Stremio, Trakt en Nuvio.',
+  subtitle: 'Verplaats kijkgeschiedenis, voortgang en opgeslagen titels tussen Simkl, Stremio, Trakt, Plex en Nuvio.',
   info: 'Koppel een bron en bestemming en start direct met synchroniseren. Een voorbeeld bekijken is optioneel. Bestaande bestemmingsgegevens blijven behouden.',
   source: 'Bron',
   destination: 'Bestemming',
@@ -71,8 +78,9 @@ const copy = computed(() => isDutch.value ? {
   email: 'E-mailadres',
   password: 'Wachtwoord',
   profile: 'Nuvio-profiel',
+  plexServer: 'Plex-server',
   swap: 'Bron en bestemming omwisselen',
-  sameService: 'Gebruik twee verschillende accounts of, bij Nuvio, twee verschillende profielen. Opent OAuth opnieuw het eerste account, log dan bij die dienst uit en verbind de bestemming opnieuw.',
+  sameService: 'Gebruik twee verschillende accounts, Nuvio-profielen of Plex-servers. Opent de koppeling opnieuw het eerste account, log dan bij die dienst uit en verbind de bestemming opnieuw.',
   scopes: 'Wat wil je verplaatsen?',
   history: 'Kijkgeschiedenis',
   historyHelp: 'Bekeken films en afleveringen',
@@ -105,11 +113,14 @@ const copy = computed(() => isDutch.value ? {
   finishedWarnings: 'Synchronisatie voltooid met meldingen.',
   secureShort: 'Synchronisatie draait lokaal in je browser',
   secure: 'Alle vergelijkings- en synchronisatielogica draait lokaal in dit browsertabblad. De Sync Bridge slaat je wachtwoorden, verbindingstokens en gesynchroniseerde gegevens nooit op; wachtwoorden gaan rechtstreeks naar de dienst waarbij je inlogt.',
-  caveat: 'De nieuwste bekeken status wordt verplaatst; afzonderlijke herhaalde afspeelbeurten worden samengevoegd. Trakt-collecties worden opgeslagen titels; benoemde lijsten en beoordelingen blijven bij hun eigen dienst.',
+  caveat: 'De nieuwste bekeken status wordt verplaatst; afzonderlijke herhaalde afspeelbeurten worden samengevoegd. Trakt-collecties worden opgeslagen titels; benoemde lijsten en beoordelingen blijven bij hun eigen dienst. Plex kan alleen status schrijven voor titels die al op de gekozen server staan.',
   setupStopped: 'Instellen gestopt',
   noChanges: 'Er zijn geen nieuwe of nieuwere items om te synchroniseren.',
   authorizeSeparate: 'Autoriseer voor deze kant een afzonderlijke sessie:',
   stremioDevice: 'Gebruik de apparaatkoppeling van Stremio, zodat deze pagina je wachtwoord nooit ontvangt.',
+  plexDevice: 'Meld je aan bij Plex en kies daarna de mediaserver die je wilt synchroniseren.',
+  openPlex: 'Open Plex-goedkeuring',
+  waitingPlex: 'Wachten op Plex-goedkeuring…',
   openStremio: 'Open Stremio-goedkeuring',
   waitingStremio: 'Wachten op Stremio-goedkeuring…',
   passwordFallback: 'Gebruik in plaats daarvan e-mail en wachtwoord',
@@ -133,7 +144,7 @@ const copy = computed(() => isDutch.value ? {
   supportButton: 'Support me on Ko-fi'
 } : {
   title: 'Sync Bridge',
-  subtitle: 'Move watch history, playback progress, and saved titles between Simkl, Stremio, Trakt, and Nuvio.',
+  subtitle: 'Move watch history, playback progress, and saved titles between Simkl, Stremio, Trakt, Plex, and Nuvio.',
   info: 'Connect a source and destination and start syncing directly. Previewing changes is optional. Existing destination data is preserved.',
   source: 'Source',
   destination: 'Destination',
@@ -145,8 +156,9 @@ const copy = computed(() => isDutch.value ? {
   email: 'Email address',
   password: 'Password',
   profile: 'Nuvio profile',
+  plexServer: 'Plex server',
   swap: 'Swap source and destination',
-  sameService: 'Use two different accounts or, for Nuvio, two different profiles. If OAuth reopens the first account, sign out at that service and reconnect the destination.',
+  sameService: 'Use two different accounts, Nuvio profiles, or Plex servers. If sign-in reopens the first account, sign out at that service and reconnect the destination.',
   scopes: 'What should move?',
   history: 'Watch history',
   historyHelp: 'Watched movies and episodes',
@@ -179,11 +191,14 @@ const copy = computed(() => isDutch.value ? {
   finishedWarnings: 'Sync complete with notes.',
   secureShort: 'Sync runs locally in your browser',
   secure: 'All comparison and sync logic runs locally in this browser tab. The Sync Bridge never stores your passwords, connection tokens, or synced data; passwords go directly to the service you sign in to.',
-  caveat: 'The latest watched state is transferred; individual replay events are collapsed. Trakt collections become saved titles; named lists and ratings stay provider-native.',
+  caveat: 'The latest watched state is transferred; individual replay events are collapsed. Trakt collections become saved titles; named lists and ratings stay provider-native. Plex can only write state for titles already present on the selected server.',
   setupStopped: 'Setup stopped',
   noChanges: 'There are no new or newer items to sync.',
   authorizeSeparate: 'Authorize a separate session for this side:',
   stremioDevice: 'Use Stremio’s device link so this page never receives your password.',
+  plexDevice: 'Sign in with Plex, then choose the media server you want to sync.',
+  openPlex: 'Open Plex approval',
+  waitingPlex: 'Waiting for Plex approval…',
   openStremio: 'Open Stremio approval',
   waitingStremio: 'Waiting for Stremio approval…',
   passwordFallback: 'Use email and password instead',
@@ -212,6 +227,7 @@ const SERVICE_LOGOS: Record<ServiceId, string> = {
   simkl: '/service-logos/simkl.ico',
   stremio: '/service-logos/stremio.png',
   trakt: '/service-logos/trakt.svg',
+  plex: '/service-logos/plex.svg',
   nuvio: '/official_logo_original.png'
 }
 const isCollapsed = ref(!props.defaultExpanded)
@@ -231,6 +247,8 @@ const connectionBusy = reactive<Record<BridgeSlot, boolean>>({ source: false, de
 const connectionAttempt = reactive<Record<BridgeSlot, number>>({ source: 0, destination: 0 })
 const stremioLinks = reactive<Record<BridgeSlot, StremioDeviceLink | null>>({ source: null, destination: null })
 const stremioLinkAttempt = reactive<Record<BridgeSlot, number>>({ source: 0, destination: 0 })
+const plexLinks = reactive<Record<BridgeSlot, PlexPinLink | null>>({ source: null, destination: null })
+const plexLinkAttempt = reactive<Record<BridgeSlot, number>>({ source: 0, destination: 0 })
 const scopes = reactive<SyncScopes>({ history: true, progress: true, library: true })
 const globalError = ref('')
 const statusMessage = ref('')
@@ -255,6 +273,7 @@ interface OAuthTransaction {
 
 const oauthTransactions = new Map<string, OAuthTransaction>()
 const stremioPopups: Record<BridgeSlot, Window | null> = { source: null, destination: null }
+const plexPopups: Record<BridgeSlot, Window | null> = { source: null, destination: null }
 let componentMounted = false
 
 const endpointValidation = computed(() => validateEndpointPair(
@@ -263,7 +282,20 @@ const endpointValidation = computed(() => validateEndpointPair(
 ))
 const sameService = computed(() => selectedService.source === selectedService.destination)
 const routeName = computed(() => routeLabel(selectedService.source, selectedService.destination))
-const enabledScopeCount = computed(() => Object.values(scopes).filter(Boolean).length)
+const routeScopeSupport = computed<SyncScopes>(() => {
+  const summary = summarizeScopes(selectedService.source, selectedService.destination, scopes)
+  return {
+    history: Boolean(summary.find(item => item.scope === 'history')?.supported),
+    progress: Boolean(summary.find(item => item.scope === 'progress')?.supported),
+    library: Boolean(summary.find(item => item.scope === 'library')?.supported)
+  }
+})
+const effectiveScopes = computed<SyncScopes>(() => ({
+  history: scopes.history && routeScopeSupport.value.history,
+  progress: scopes.progress && routeScopeSupport.value.progress,
+  library: scopes.library && routeScopeSupport.value.library
+}))
+const enabledScopeCount = computed(() => Object.values(effectiveScopes.value).filter(Boolean).length)
 const routeLocked = computed(() => Boolean(
   actionBusy.value || connectionBusy.source || connectionBusy.destination
 ))
@@ -271,7 +303,7 @@ const currentSignature = computed(() => JSON.stringify({
   source: endpointFingerprint(connections.source),
   destination: endpointFingerprint(connections.destination),
   services: selectedService,
-  scopes
+  scopes: effectiveScopes.value
 }))
 const transferCount = computed(() => preview.value
   ? preview.value.transfer.history.length
@@ -401,12 +433,17 @@ function disconnect(slot: BridgeSlot, record = true) {
   const stremioPopup = stremioPopups[slot]
   if (stremioPopup && !stremioPopup.closed) stremioPopup.close()
   stremioPopups[slot] = null
+  const plexPopup = plexPopups[slot]
+  if (plexPopup && !plexPopup.closed) plexPopup.close()
+  plexPopups[slot] = null
   connections[slot] = null
   forms[slot].password = ''
   connectionBusy[slot] = false
   connectionAttempt[slot]++
   stremioLinks[slot] = null
   stremioLinkAttempt[slot]++
+  plexLinks[slot] = null
+  plexLinkAttempt[slot]++
   cancelOAuthForSlot(slot)
   clearPreview()
   if (record && connection) appendLog(`${slotLabel(slot)} ${connection.service} account disconnected.`)
@@ -467,37 +504,67 @@ async function connectStremioDevice(slot: BridgeSlot) {
   }
 }
 
-function swapEndpoints() {
-  cancelOAuthForSlot('source')
-  cancelOAuthForSlot('destination')
-  for (const slot of bridgeSlots) {
-    const popup = stremioPopups[slot]
-    if (popup && !popup.closed) popup.close()
-    stremioPopups[slot] = null
+async function connectPlex(slot: BridgeSlot) {
+  if (selectedService[slot] !== 'plex') return
+  const attempt = ++plexLinkAttempt[slot]
+  const popup = window.open('about:blank', `plex-${slot}-link`, 'width=720,height=780')
+  if (!popup) {
+    globalError.value = 'Allow popups for this site, then try again.'
+    return
   }
-  stremioLinkAttempt.source++
-  stremioLinkAttempt.destination++
-  stremioLinks.source = null
-  stremioLinks.destination = null
-  connectionBusy.source = false
-  connectionBusy.destination = false
-  connectionAttempt.source++
-  connectionAttempt.destination++
-  const sourceService = selectedService.source
-  selectedService.source = selectedService.destination
-  selectedService.destination = sourceService
-
-  const sourceConnection = connections.source
-  const destinationConnection = connections.destination
-  connections.source = destinationConnection ? { ...destinationConnection, slot: 'source' } : null
-  connections.destination = sourceConnection ? { ...sourceConnection, slot: 'destination' } : null
-
-  const sourceForm = { ...forms.source }
-  forms.source = { ...forms.destination }
-  forms.destination = sourceForm
-  clearPreview()
+  plexPopups[slot] = popup
+  connectionBusy[slot] = true
   globalError.value = ''
-  appendLog(`Route changed to ${routeName.value}.`)
+  appendLog(`Creating a Plex sign-in link for the ${slotLabel(slot).toLowerCase()}...`)
+  try {
+    const pin = await createPlexPinLink()
+    if (!componentMounted || attempt !== plexLinkAttempt[slot] || selectedService[slot] !== 'plex') {
+      if (!popup.closed) popup.close()
+      return
+    }
+    if (popup.closed) throw new Error('The Plex approval window was closed.')
+    plexLinks[slot] = pin
+    popup.location.replace(pin.link)
+    popup.focus()
+    appendLog('Approve the request with Plex. The bridge is waiting for the account token...')
+    for (let poll = 0; poll < 180; poll++) {
+      if (attempt !== plexLinkAttempt[slot] || selectedService[slot] !== 'plex') return
+      const token = await readPlexPinLink(pin)
+      if (token) {
+        const login = await signInPlex(token, pin.clientIdentifier)
+        if (attempt !== plexLinkAttempt[slot] || selectedService[slot] !== 'plex') return
+        connections[slot] = createPlexConnection(slot, login)
+        plexLinks[slot] = null
+        clearPreview()
+        const serverName = connections[slot]!.credentials.service === 'plex'
+          ? connections[slot]!.credentials.server.name
+          : 'the selected server'
+        appendLog(`Plex connected to ${serverName}.`)
+        statusMessage.value = `${slotLabel(slot)} connected.`
+        if (!popup.closed) popup.close()
+        return
+      }
+      if (popup.closed) throw new Error('The Plex approval window was closed before linking finished.')
+      await wait(1_000)
+    }
+    throw new Error('The Plex sign-in link expired. Start a new connection and approve it again.')
+  } catch (error: any) {
+    if (attempt !== plexLinkAttempt[slot]) return
+    if (!popup.closed) popup.close()
+    plexLinks[slot] = null
+    globalError.value = error.message
+    appendLog(`Plex connection failed: ${error.message}`)
+  } finally {
+    if (plexPopups[slot] === popup) plexPopups[slot] = null
+    if (attempt === plexLinkAttempt[slot]) connectionBusy[slot] = false
+  }
+}
+
+function updatePlexServer(slot: BridgeSlot, event: Event) {
+  const connection = connections[slot]
+  if (!connection || connection.service !== 'plex') return
+  connections[slot] = selectPlexServer(connection, (event.target as HTMLSelectElement).value)
+  clearPreview()
 }
 
 function oauthUrl(path: string) {
@@ -688,7 +755,7 @@ async function buildPreview() {
   if (!canPreview.value || !connections.source || !connections.destination) return
   const sourceConnection = connections.source
   const destinationConnection = connections.destination
-  const requestedScopes = { ...scopes }
+  const requestedScopes = { ...effectiveScopes.value }
   actionBusy.value = 'preview'
   globalError.value = ''
   statusMessage.value = copy.value.previewing
@@ -727,7 +794,7 @@ async function runSync() {
   if (!canSync.value || !connections.source || !connections.destination) return
   const sourceConnection = connections.source
   const destinationConnection = connections.destination
-  const requestedScopes = { ...scopes }
+  const requestedScopes = { ...effectiveScopes.value }
   previewSignature.value = ''
   actionBusy.value = 'sync'
   globalError.value = ''
@@ -854,6 +921,8 @@ onBeforeUnmount(() => {
   connectionAttempt.destination++
   stremioLinkAttempt.source++
   stremioLinkAttempt.destination++
+  plexLinkAttempt.source++
+  plexLinkAttempt.destination++
   window.removeEventListener('message', handleOAuthMessage)
   for (const transaction of oauthTransactions.values()) {
     clearInterval(transaction.timer)
@@ -865,6 +934,9 @@ onBeforeUnmount(() => {
     const popup = stremioPopups[slot]
     if (popup && !popup.closed) popup.close()
     stremioPopups[slot] = null
+    const plexPopup = plexPopups[slot]
+    if (plexPopup && !plexPopup.closed) plexPopup.close()
+    plexPopups[slot] = null
   }
 })
 </script>
@@ -997,6 +1069,24 @@ onBeforeUnmount(() => {
               </select>
             </label>
 
+            <label v-if="connections[slot]?.service === 'plex'" class="field-block">
+              <span>{{ copy.plexServer }}</span>
+              <select
+                :value="connections[slot]!.serverId"
+                :aria-label="`${slotLabel(slot)} ${copy.plexServer}`"
+                :disabled="routeLocked"
+                @change="updatePlexServer(slot, $event)"
+              >
+                <option
+                  v-for="server in connections[slot]!.servers"
+                  :key="server.id"
+                  :value="server.id"
+                >
+                  {{ server.name }}{{ server.owned ? '' : ' · shared' }}
+                </option>
+              </select>
+            </label>
+
             <div v-if="!connections[slot] && ['trakt', 'simkl'].includes(selectedService[slot])" class="connect-area">
               <p>{{ copy.authorizeSeparate }} {{ SERVICE_DEFINITIONS[selectedService[slot]].label }}</p>
               <button
@@ -1097,13 +1187,30 @@ onBeforeUnmount(() => {
                 </form>
               </details>
             </div>
+
+            <div v-if="!connections[slot] && selectedService[slot] === 'plex'" class="connect-area">
+              <p>{{ copy.plexDevice }}</p>
+              <a
+                v-if="plexLinks[slot]"
+                class="device-link"
+                :href="plexLinks[slot]!.link"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {{ copy.openPlex }}
+              </a>
+              <button
+                type="button"
+                class="primary-button connect-button"
+                :aria-label="`${copy.connect} Plex ${slotLabel(slot)}`"
+                :disabled="connectionBusy[slot]"
+                @click="connectPlex(slot)"
+              >
+                {{ connectionBusy[slot] ? copy.waitingPlex : `${copy.connect} Plex` }}
+              </button>
+            </div>
           </article>
 
-          <button type="button" class="swap-button" :aria-label="copy.swap" :title="copy.swap" :disabled="routeLocked" @click="swapEndpoints">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M7 7h12m0 0-3-3m3 3-3 3M17 17H5m0 0 3 3m-3-3 3-3" />
-            </svg>
-          </button>
         </div>
 
         <p v-if="sameService" class="same-service-note">
@@ -1119,8 +1226,17 @@ onBeforeUnmount(() => {
             <div><span class="eyebrow">{{ copy.syncPlan }}</span><strong id="bridge-scope-title">{{ copy.scopes }}</strong></div>
           </div>
           <div class="scope-grid">
-            <label v-for="scope in (['history', 'progress', 'library'] as const)" :key="scope" class="scope-option">
-              <input v-model="scopes[scope]" type="checkbox" :disabled="routeLocked" @change="clearPreview" />
+            <label
+              v-for="scope in (['history', 'progress', 'library'] as const)"
+              :key="scope"
+              :class="['scope-option', { 'is-unsupported': !routeScopeSupport[scope] }]"
+            >
+              <input
+                v-model="scopes[scope]"
+                type="checkbox"
+                :disabled="routeLocked || !routeScopeSupport[scope]"
+                @change="clearPreview"
+              />
               <span class="check-box" aria-hidden="true">
                 <svg viewBox="0 0 16 16"><path d="m3 8 3 3 7-7" /></svg>
               </span>
@@ -1405,18 +1521,19 @@ onBeforeUnmount(() => {
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  overflow: hidden;
-  border: 1px solid var(--vp-c-divider);
-  border-radius: var(--bridge-radius);
-  background: var(--vp-c-bg);
+  gap: 20px;
 }
 .endpoint-card, .scope-panel, .preview-panel, .issues-panel, .activity-panel {
   border: 1px solid var(--vp-c-divider);
   border-radius: var(--bridge-radius);
   background: var(--vp-c-bg);
 }
-.endpoint-card { min-width: 0; padding: 26px; border: 0; border-radius: 0; }
-.endpoint-card + .endpoint-card { border-left: 1px solid var(--vp-c-divider); }
+.endpoint-card {
+  min-width: 0;
+  padding: 22px;
+  border-radius: 12px;
+  background: var(--tool-surface-alt, var(--vp-c-bg-alt));
+}
 .endpoint-heading { gap: 11px; min-height: 38px; }
 .endpoint-heading > div, .section-heading > div { display: flex; flex-direction: column; min-width: 0; }
 .endpoint-heading strong, .section-heading strong { color: var(--vp-c-text-1); font-weight: 600; }
@@ -1460,9 +1577,6 @@ onBeforeUnmount(() => {
 }
 .service-select-shell select:disabled { cursor: not-allowed; }
 .service-select-shell svg { width: 18px; fill: none; stroke: currentColor; stroke-width: 2; pointer-events: none; }
-
-.swap-button { position: absolute; z-index: 2; top: 78px; left: 50%; display: grid; place-items: center; width: 40px; height: 40px; transform: translateX(-50%); border: 1px solid var(--vp-c-divider); border-radius: 50%; background: var(--vp-c-bg); color: var(--vp-c-brand-1); box-shadow: 0 6px 18px rgb(0 0 0 / 10%); cursor: pointer; }
-.swap-button svg { width: 19px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
 .connect-area { display: flex; flex-direction: column; gap: 14px; }
 .connect-area p { margin: 0; color: var(--vp-c-text-2); font-size: 13px; line-height: 1.55; }
@@ -1511,6 +1625,7 @@ button:disabled { opacity: .48; cursor: not-allowed; }
 .section-heading { gap: 12px; margin-bottom: 18px; }
 .scope-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .scope-option { position: relative; display: flex; align-items: flex-start; gap: 11px; padding: 16px; border: 1px solid var(--vp-c-divider); border-radius: 10px; background: var(--vp-c-bg-alt); cursor: pointer; }
+.scope-option.is-unsupported { opacity: .48; cursor: not-allowed; }
 .scope-option input { position: absolute; opacity: 0; }
 .scope-option > span:last-child { display: flex; flex-direction: column; }
 .scope-option strong { color: var(--vp-c-text-1); font-size: 13px; font-weight: 600; }
@@ -1870,17 +1985,20 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 }
 
 @media (max-width: 900px) {
-  .route-builder { grid-template-columns: 1fr; }
-  .endpoint-card + .endpoint-card { border-top: 1px solid var(--vp-c-divider); border-left: 0; }
-  .swap-button { top: 50%; left: calc(100% - 28px); transform: translateY(-50%) rotate(90deg); }
+  .route-builder { grid-template-columns: 1fr; gap: 16px; }
   .scope-grid { grid-template-columns: 1fr; }
   .stats-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 @media (max-width: 600px) {
   .bridge-body { padding: 18px; }
-  .endpoint-card { padding: 20px; }
-  .scope-panel { padding: 20px; }
+  .sync-bridge.is-standalone .bridge-body { padding: 17px; }
+  .endpoint-card { padding: 17px; }
+  .scope-panel {
+    padding: 17px;
+    border-radius: 12px;
+    background: var(--tool-surface-alt, var(--vp-c-bg-alt));
+  }
   .bridge-intro { flex-direction: column; }
   .secure-note { display: none; }
   .credential-form { grid-template-columns: 1fr; }

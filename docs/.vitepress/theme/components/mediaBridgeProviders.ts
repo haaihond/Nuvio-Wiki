@@ -1,6 +1,8 @@
 import {
   createEmptyBundle,
   dedupeBundle,
+  mediaAliasKeys,
+  normalizeTitle,
   parseStremioVideoId,
   remapEpisode,
   type BridgeScope,
@@ -25,6 +27,9 @@ import {
 const TRAKT_API = 'https://api.trakt.tv'
 const SIMKL_API = 'https://api.simkl.com'
 const STREMIO_API = 'https://api.strem.io/api'
+const PLEX_TV_API = 'https://plex.tv/api/v2'
+const PLEX_CLIENTS_API = 'https://clients.plex.tv/api/v2'
+const PLEX_PRODUCT = 'Nuvio Wiki Sync Bridge'
 const CINEMETA_API = 'https://v3-cinemeta.strem.io'
 const NUVIO_API = 'https://api.nuvio.tv'
 const TRAKT_MAX_RESUME_PROGRESS = 79
@@ -50,7 +55,7 @@ const STANDARD_MEDIA_ID_KEYS = new Set([
   'tvdb', 'tvdb_id',
   'trakt', 'trakt_id', 'traktslug',
   'simkl', 'simkl_id',
-  'stremio', 'slug', 'external'
+  'plex', 'stremio', 'slug', 'external'
 ])
 
 const EXTERNAL_ID_NAMESPACE_ALIASES: Record<string, string> = {
@@ -112,15 +117,32 @@ export interface NuvioCredentials {
   publicKey: string
 }
 
+export interface PlexServer {
+  id: string
+  name: string
+  baseUrl: string
+  accessToken: string
+  owned: boolean
+}
+
+export interface PlexCredentials {
+  service: 'plex'
+  accountToken: string
+  clientIdentifier: string
+  server: PlexServer
+}
+
 export type BridgeCredentials =
   | TraktCredentials
   | SimklCredentials
   | StremioCredentials
+  | PlexCredentials
   | NuvioCredentials
 
 export interface BridgeConnection extends ConnectedEndpoint {
   credentials: BridgeCredentials
   profiles?: NuvioProfile[]
+  servers?: PlexServer[]
 }
 
 export interface NuvioProfile {
@@ -685,6 +707,191 @@ async function stremioRequest(
   return data?.result ?? data
 }
 
+function plexHeaders(clientIdentifier: string, token?: string): Record<string, string> {
+  return {
+    Accept: 'application/json',
+    'X-Plex-Client-Identifier': clientIdentifier,
+    'X-Plex-Product': PLEX_PRODUCT,
+    ...(token ? { 'X-Plex-Token': token } : {})
+  }
+}
+
+function createClientIdentifier(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `nuvio-wiki-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+export interface PlexPinLink {
+  id: number
+  code: string
+  link: string
+  clientIdentifier: string
+}
+
+export async function createPlexPinLink(
+  clientIdentifier = createClientIdentifier()
+): Promise<PlexPinLink> {
+  const { data } = await requestBridgeJson(`${PLEX_TV_API}/pins?strong=true`, {
+    method: 'POST',
+    headers: plexHeaders(clientIdentifier)
+  })
+  const id = Number(data?.id)
+  const code = String(data?.code || '')
+  if (!Number.isSafeInteger(id) || !code) throw new Error('Plex returned an incomplete sign-in PIN.')
+  const params = new URLSearchParams({
+    clientID: clientIdentifier,
+    code,
+    'context[device][product]': PLEX_PRODUCT
+  })
+  return {
+    id,
+    code,
+    link: `https://app.plex.tv/auth#?${params.toString()}`,
+    clientIdentifier
+  }
+}
+
+export async function readPlexPinLink(pin: PlexPinLink): Promise<string | null> {
+  const { data } = await requestBridgeJson(`${PLEX_TV_API}/pins/${pin.id}`, {
+    headers: plexHeaders(pin.clientIdentifier)
+  })
+  return String(data?.authToken || data?.auth_token || '') || null
+}
+
+function plexConnectionCandidates(resource: any): any[] {
+  const allowHttp = typeof window === 'undefined' || window.location.protocol === 'http:'
+  return (Array.isArray(resource?.connections) ? resource.connections : [])
+    .filter((connection: any) => {
+      const uri = String(connection?.uri || '')
+      return uri.startsWith('https://') || (allowHttp && uri.startsWith('http://'))
+    })
+    .sort((left: any, right: any) => (
+      Number(Boolean(right.local)) - Number(Boolean(left.local))
+      || Number(Boolean(left.relay)) - Number(Boolean(right.relay))
+      || Number(String(right.protocol || '').toLowerCase() === 'https')
+        - Number(String(left.protocol || '').toLowerCase() === 'https')
+    ))
+}
+
+async function reachablePlexServer(resource: any, clientIdentifier: string): Promise<PlexServer | null> {
+  const accessToken = String(resource?.accessToken || '')
+  if (!accessToken) return null
+  for (const candidate of plexConnectionCandidates(resource)) {
+    const baseUrl = String(candidate.uri || '').replace(/\/+$/, '')
+    try {
+      await requestBridgeJson(`${baseUrl}/identity`, {
+        headers: plexHeaders(clientIdentifier, accessToken)
+      })
+      return {
+        id: String(resource?.clientIdentifier || resource?.machineIdentifier || ''),
+        name: String(resource?.name || 'Plex Media Server'),
+        baseUrl,
+        accessToken,
+        owned: Boolean(resource?.owned)
+      }
+    } catch {
+      // Try the next advertised direct or relay connection.
+    }
+  }
+  return null
+}
+
+export async function signInPlex(accountToken: string, clientIdentifier: string): Promise<{
+  accountToken: string
+  clientIdentifier: string
+  accountId: string
+  displayName: string
+  servers: PlexServer[]
+}> {
+  const headers = plexHeaders(clientIdentifier, accountToken)
+  const [{ data: user }, { data: resources }] = await Promise.all([
+    requestBridgeJson(`${PLEX_TV_API}/user`, { headers }),
+    requestBridgeJson(`${PLEX_CLIENTS_API}/resources?includeHttps=1&includeRelay=1&includeIPv6=1`, { headers })
+  ])
+  const accountId = String(user?.id || user?.uuid || user?.username || user?.email || '')
+  if (!accountId) throw new Error('Plex did not expose a verified account identity.')
+  const mediaServers = (Array.isArray(resources) ? resources : [])
+    .filter(resource => (
+      resource?.product === 'Plex Media Server'
+      || String(resource?.provides || '').split(',').includes('server')
+    ))
+  const servers = (await Promise.all(
+    mediaServers.map(resource => reachablePlexServer(resource, clientIdentifier))
+  ))
+    .filter((server): server is PlexServer => Boolean(server?.id))
+    .sort((left, right) => (
+      Number(right.owned) - Number(left.owned) || left.name.localeCompare(right.name)
+    ))
+  if (!servers.length) {
+    throw new Error('No reachable Plex Media Server with an HTTPS connection was found for this account.')
+  }
+  return {
+    accountToken,
+    clientIdentifier,
+    accountId,
+    displayName: String(user?.friendlyName || user?.username || user?.email || accountId),
+    servers
+  }
+}
+
+async function plexRequest(
+  connection: BridgeConnection,
+  path: string,
+  params: Record<string, any> = {},
+  options: RequestInit = {}
+): Promise<JsonResponse> {
+  if (connection.credentials.service !== 'plex') throw new Error('Expected Plex credentials.')
+  const url = new URL(`${connection.credentials.server.baseUrl}${path.startsWith('/') ? path : `/${path}`}`)
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value))
+  }
+  return requestBridgeJson(url.toString(), {
+    ...options,
+    headers: {
+      ...plexHeaders(
+        connection.credentials.clientIdentifier,
+        connection.credentials.server.accessToken
+      ),
+      'X-Plex-Pms-Api-Version': '1.0',
+      ...(options.headers || {})
+    }
+  })
+}
+
+function plexRows(data: any): any[] {
+  const container = data?.MediaContainer || data || {}
+  return Array.isArray(container.Metadata)
+    ? container.Metadata
+    : Array.isArray(container.Directory)
+      ? container.Directory
+      : []
+}
+
+async function plexGetAll(
+  connection: BridgeConnection,
+  path: string,
+  params: Record<string, any> = {}
+): Promise<any[]> {
+  const output: any[] = []
+  const size = 500
+  for (let start = 0; start < 100_000; start += size) {
+    const { data } = await plexRequest(connection, path, params, {
+      headers: {
+        'X-Plex-Container-Start': String(start),
+        'X-Plex-Container-Size': String(size)
+      }
+    })
+    const rows = plexRows(data)
+    output.push(...rows)
+    const container = data?.MediaContainer || data || {}
+    const total = Number(container.totalSize || container.size || 0)
+    if (!rows.length || rows.length < size || (total && output.length >= total)) break
+  }
+  return output
+}
+
 export async function signInNuvio(email: string, password: string): Promise<{
   session: NuvioSession
   profiles: NuvioProfile[]
@@ -842,6 +1049,431 @@ export async function identifyOAuthConnection(
     accountId,
     displayName: String(user?.name || user?.username || user?.email || accountId)
   }
+}
+
+interface PlexCatalogEntry {
+  media: MediaRef
+  ratingKey: string
+  key: string
+  sectionId: string
+  sectionName: string
+  addedAt: number
+  updatedAt: number
+  lastViewedAt: number
+  viewCount: number
+  viewOffset: number
+  duration: number
+}
+
+interface PlexCatalog {
+  movies: PlexCatalogEntry[]
+  shows: PlexCatalogEntry[]
+  episodes: PlexCatalogEntry[]
+}
+
+function plexGuidIds(value: any, parent?: any): MediaIds {
+  const ids: MediaIds = {}
+  const identity = parent || value
+  const plexGuid = String(identity?.guid || '').trim().toLowerCase()
+  if (plexGuid) ids.plex = plexGuid
+  else if (identity?.ratingKey) ids.plex = `rating:${identity.ratingKey}`
+
+  const guidValues = [
+    plexGuid,
+    ...(Array.isArray(identity?.Guid) ? identity.Guid.map((guid: any) => guid?.id) : [])
+  ]
+  for (const raw of guidValues) {
+    const guid = String(raw || '').trim().toLowerCase().split('?')[0]
+    if (!guid) continue
+    if (guid.includes('imdb')) {
+      const imdb = /tt\d+/.exec(guid)?.[0]
+      if (imdb) ids.imdb = imdb
+    }
+    const numeric = /^(tmdb|tvdb):\/\/(\d+)$/i.exec(guid)
+    if (numeric?.[1] === 'tmdb') ids.tmdb = numeric[2]
+    if (numeric?.[1] === 'tvdb') ids.tvdb = numeric[2]
+    const legacyTmdb = /(?:themoviedb|tmdb):\/\/(\d+)$/i.exec(guid)?.[1]
+    const legacyTvdb = /(?:thetvdb|tvdb):\/\/(\d+)$/i.exec(guid)?.[1]
+    if (legacyTmdb) ids.tmdb = legacyTmdb
+    if (legacyTvdb) ids.tvdb = legacyTvdb
+  }
+  return ids
+}
+
+function plexCatalogEntry(
+  value: any,
+  section: any,
+  kind: 'movie' | 'series',
+  parentShow?: any
+): PlexCatalogEntry | null {
+  const ratingKey = String(value?.ratingKey || '')
+  if (!ratingKey) return null
+  const media: MediaRef = {
+    kind,
+    ids: plexGuidIds(value, parentShow),
+    title: kind === 'series' && parentShow
+      ? String(value?.grandparentTitle || parentShow?.title || '') || undefined
+      : String(value?.title || '') || undefined,
+    year: Number(parentShow?.year || value?.year) || undefined
+  }
+  if (kind === 'series' && parentShow) {
+    media.season = Number(value?.parentIndex)
+    media.episode = Number(value?.index)
+    media.absoluteEpisode = Number(value?.absoluteIndex) || undefined
+    media.episodeTitle = String(value?.title || '') || undefined
+    media.videoId = `plex:${ratingKey}`
+  }
+  return {
+    media,
+    ratingKey,
+    key: String(value?.key || `/library/metadata/${ratingKey}`),
+    sectionId: String(section?.key || section?.uuid || ''),
+    sectionName: String(section?.title || 'Plex library'),
+    addedAt: asEpochMs(value?.addedAt),
+    updatedAt: asEpochMs(value?.updatedAt || value?.lastViewedAt || value?.addedAt),
+    lastViewedAt: asEpochMs(value?.lastViewedAt || value?.updatedAt),
+    viewCount: Math.max(0, Number(value?.viewCount || 0)),
+    viewOffset: Math.max(0, Number(value?.viewOffset || 0)),
+    duration: Math.max(0, Number(value?.duration || 0))
+  }
+}
+
+const plexCatalogCache = new WeakMap<object, { expiresAt: number; promise: Promise<PlexCatalog> }>()
+
+async function loadPlexCatalog(connection: BridgeConnection, log?: BridgeLog): Promise<PlexCatalog> {
+  if (connection.credentials.service !== 'plex') throw new Error('Expected Plex credentials.')
+  const cached = plexCatalogCache.get(connection.credentials)
+  if (cached && cached.expiresAt > Date.now()) return cached.promise
+
+  const promise = (async () => {
+    logTo(log, `Reading Plex libraries from ${connection.credentials.server.name}...`)
+    const { data } = await plexRequest(connection, '/library/sections')
+    const sections = plexRows(data).filter(section => ['movie', 'show'].includes(String(section?.type)))
+    const movies: PlexCatalogEntry[] = []
+    const shows: PlexCatalogEntry[] = []
+    const episodes: PlexCatalogEntry[] = []
+
+    await mapLimit(sections, 3, async section => {
+      const path = `/library/sections/${encodeURIComponent(String(section.key))}/all`
+      if (section.type === 'movie') {
+        const rows = await plexGetAll(connection, path, { type: 1, includeGuids: 1 })
+        for (const row of rows) {
+          const entry = plexCatalogEntry(row, section, 'movie')
+          if (entry) movies.push(entry)
+        }
+        return
+      }
+
+      const [showRows, episodeRows] = await Promise.all([
+        plexGetAll(connection, path, { type: 2, includeGuids: 1 }),
+        plexGetAll(connection, path, { type: 4, includeGuids: 1 })
+      ])
+      const showsByRatingKey = new Map<string, any>()
+      for (const row of showRows) {
+        showsByRatingKey.set(String(row.ratingKey), row)
+        const entry = plexCatalogEntry(row, section, 'series')
+        if (entry) shows.push(entry)
+      }
+      for (const row of episodeRows) {
+        const parentShow = showsByRatingKey.get(String(row.grandparentRatingKey))
+        const entry = plexCatalogEntry(row, section, 'series', parentShow || {
+          ratingKey: row.grandparentRatingKey,
+          guid: row.grandparentGuid,
+          title: row.grandparentTitle,
+          year: row.year
+        })
+        if (entry && Number.isInteger(entry.media.season) && Number.isInteger(entry.media.episode)) {
+          episodes.push(entry)
+        }
+      }
+    })
+    logTo(log, `Indexed ${movies.length} Plex movies, ${shows.length} shows, and ${episodes.length} episodes.`)
+    return { movies, shows, episodes }
+  })()
+
+  plexCatalogCache.set(connection.credentials, { expiresAt: Date.now() + 30_000, promise })
+  try {
+    return await promise
+  } catch (error) {
+    plexCatalogCache.delete(connection.credentials)
+    throw error
+  }
+}
+
+function plexCandidates(media: MediaRef, entries: readonly PlexCatalogEntry[]): PlexCatalogEntry[] {
+  const aliases = new Set(mediaAliasKeys(media))
+  if (aliases.size) {
+    const exact = entries.filter(entry => mediaAliasKeys(entry.media).some(alias => aliases.has(alias)))
+    if (exact.length) return exact
+  }
+  const title = normalizeTitle(media.title)
+  const year = Number(media.year)
+  if (!title) return []
+  return entries.filter(entry => (
+    normalizeTitle(entry.media.title) === title
+    && (!Number.isInteger(year) || !entry.media.year || Number(entry.media.year) === year)
+    && (['imdb', 'tmdb', 'tvdb'] as const).every(namespace => {
+      const sourceId = String(media.ids[namespace] ?? '').trim().toLowerCase()
+      const targetId = String(entry.media.ids[namespace] ?? '').trim().toLowerCase()
+      return !sourceId || !targetId || sourceId === targetId
+    })
+  ))
+}
+
+function uniquePlexCandidate(media: MediaRef, entries: readonly PlexCatalogEntry[]): PlexCatalogEntry | null {
+  const candidates = plexCandidates(media, entries)
+  return candidates.length === 1 ? candidates[0] : null
+}
+
+async function plexTargetEpisodes(
+  connection: BridgeConnection,
+  media: MediaRef
+): Promise<EpisodeRef[]> {
+  const catalog = await loadPlexCatalog(connection)
+  const show = uniquePlexCandidate(media, catalog.shows)
+  if (!show) return []
+  return catalog.episodes
+    .filter(entry => plexCandidates(show.media, [{ ...show, media: entry.media }]).length > 0)
+    .map(entry => ({
+      season: Number(entry.media.season),
+      episode: Number(entry.media.episode),
+      absoluteEpisode: entry.media.absoluteEpisode,
+      title: entry.media.episodeTitle,
+      videoId: `plex:${entry.ratingKey}`
+    }))
+}
+
+function plexEpisodeEntriesForShow(
+  media: MediaRef,
+  catalog: PlexCatalog
+): PlexCatalogEntry[] {
+  const show = uniquePlexCandidate(media, catalog.shows)
+  if (!show) return []
+  const showAliases = new Set(mediaAliasKeys(show.media))
+  return catalog.episodes.filter(entry => (
+    mediaAliasKeys(entry.media).some(alias => showAliases.has(alias))
+  ))
+}
+
+function resolvePlexEntry(
+  media: MediaRef,
+  catalog: PlexCatalog,
+  scope: 'history' | 'progress' | 'library'
+): { entry: PlexCatalogEntry | null; issue?: BridgeIssue } {
+  if (media.kind === 'movie') {
+    const candidates = plexCandidates(media, catalog.movies)
+    if (candidates.length === 1) return { entry: candidates[0] }
+    return {
+      entry: null,
+      issue: {
+        scope,
+        status: candidates.length > 1 ? 'ambiguous' : 'unresolved',
+        media,
+        reason: candidates.length > 1
+          ? 'Multiple Plex movies matched this title and ID set.'
+          : 'This movie is not present in the selected Plex server library.'
+      }
+    }
+  }
+  if (scope === 'library' || !Number.isInteger(media.season) || !Number.isInteger(media.episode)) {
+    const candidates = plexCandidates(media, catalog.shows)
+    if (candidates.length === 1) return { entry: candidates[0] }
+    return {
+      entry: null,
+      issue: {
+        scope,
+        status: candidates.length > 1 ? 'ambiguous' : 'unresolved',
+        media,
+        reason: candidates.length > 1
+          ? 'Multiple Plex shows matched this title and ID set.'
+          : 'This show is not present in the selected Plex server library.'
+      }
+    }
+  }
+
+  const episodes = plexEpisodeEntriesForShow(media, catalog)
+  const requested: EpisodeRef = {
+    season: Number(media.season),
+    episode: Number(media.episode),
+    absoluteEpisode: media.absoluteEpisode,
+    title: media.episodeTitle,
+    videoId: media.videoId
+  }
+  const targets = episodes.map(entry => ({
+    season: Number(entry.media.season),
+    episode: Number(entry.media.episode),
+    absoluteEpisode: entry.media.absoluteEpisode,
+    title: entry.media.episodeTitle,
+    videoId: `plex:${entry.ratingKey}`
+  }))
+  const mapping = remapEpisode(requested, [requested], targets)
+  if (mapping.status !== 'mapped') {
+    return {
+      entry: null,
+      issue: { scope, status: mapping.status, media, reason: mapping.reason }
+    }
+  }
+  const ratingKey = String(mapping.target.videoId || '').replace(/^plex:/, '')
+  const entry = episodes.find(candidate => candidate.ratingKey === ratingKey) || null
+  return entry
+    ? { entry }
+    : {
+        entry: null,
+        issue: { scope, status: 'unresolved', media, reason: 'The mapped Plex episode could not be resolved.' }
+      }
+}
+
+async function pullPlex(options: PullOptions): Promise<PullResult> {
+  const { connection, scopes, log } = options
+  const catalog = await loadPlexCatalog(connection, log)
+  const bundle = createEmptyBundle()
+  const provenance = sourceOf(connection)
+
+  if (scopes.history) {
+    for (const entry of [...catalog.movies, ...catalog.episodes]) {
+      if (entry.viewCount < 1) continue
+      bundle.history.push({
+        media: entry.media,
+        watchedAt: entry.lastViewedAt || entry.updatedAt || entry.addedAt,
+        playCount: entry.viewCount,
+        source: provenance
+      })
+    }
+  }
+
+  if (scopes.progress) {
+    for (const entry of [...catalog.movies, ...catalog.episodes]) {
+      if (!entry.viewOffset || !entry.duration || entry.viewOffset >= entry.duration) continue
+      bundle.progress.push({
+        media: entry.media,
+        positionMs: entry.viewOffset,
+        durationMs: entry.duration,
+        percentage: Math.min(100, entry.viewOffset / entry.duration * 100),
+        updatedAt: entry.updatedAt || entry.lastViewedAt || entry.addedAt,
+        source: provenance
+      })
+    }
+  }
+
+  if (scopes.library) {
+    for (const entry of [...catalog.movies, ...catalog.shows]) {
+      bundle.library.push({
+        media: entry.media,
+        addedAt: entry.addedAt,
+        lists: [{
+          ...provenance,
+          kind: 'library',
+          listId: entry.sectionId,
+          name: entry.sectionName
+        }],
+        source: provenance
+      })
+    }
+  }
+
+  return { bundle: dedupeBundle(bundle), issues: [] }
+}
+
+async function pushPlex(options: PushOptions): Promise<PushResult> {
+  const { connection, bundle, scopes, log } = options
+  if (connection.credentials.service !== 'plex') throw new Error('Expected Plex credentials.')
+  const catalog = await loadPlexCatalog(connection, log)
+  const written: PushCounts = { history: 0, progress: 0, library: 0 }
+  const skipped: PushCounts = { history: 0, progress: 0, library: 0 }
+  const issues: BridgeIssue[] = []
+  const confirmedScopes: BridgeScope[] = []
+
+  if (scopes.history) {
+    for (const record of bundle.history) {
+      const resolved = resolvePlexEntry(record.media, catalog, 'history')
+      if (!resolved.entry) {
+        skipped.history++
+        if (resolved.issue) issues.push(resolved.issue)
+        continue
+      }
+      try {
+        await plexRequest(connection, '/:/scrobble', {
+          identifier: 'com.plexapp.plugins.library',
+          key: resolved.entry.ratingKey
+        }, { method: 'PUT' })
+        written.history++
+      } catch (error: any) {
+        skipped.history++
+        issues.push({
+          scope: 'history',
+          status: 'warning',
+          media: record.media,
+          reason: `Plex could not mark this item watched: ${errorDetail(error?.body, error?.message)}`
+        })
+      }
+    }
+    confirmedScopes.push('history')
+    logTo(log, `Marked ${written.history} Plex items watched.`)
+  }
+
+  if (scopes.progress) {
+    for (const record of bundle.progress) {
+      const resolved = resolvePlexEntry(record.media, catalog, 'progress')
+      if (!resolved.entry) {
+        skipped.progress++
+        if (resolved.issue) issues.push(resolved.issue)
+        continue
+      }
+      const absolute = absoluteProgress(record)
+      const durationMs = absolute?.durationMs || resolved.entry.duration
+      const percentage = progressPercentage(record)
+      const positionMs = absolute?.positionMs || (durationMs && percentage
+        ? Math.round(durationMs * percentage / 100)
+        : 0)
+      if (!durationMs || !positionMs) {
+        skipped.progress++
+        issues.push({
+          scope: 'progress',
+          status: 'unresolved',
+          media: record.media,
+          reason: 'Plex progress needs a valid position and duration.'
+        })
+        continue
+      }
+      try {
+        await plexRequest(connection, '/:/timeline', {
+          key: resolved.entry.key,
+          ratingKey: resolved.entry.ratingKey,
+          state: 'stopped',
+          time: Math.max(1, Math.min(Math.round(positionMs), Math.round(durationMs) - 1)),
+          duration: Math.round(durationMs),
+          updated: Math.floor(record.updatedAt / 1000),
+          offline: 1
+        }, {
+          method: 'POST',
+          headers: { 'X-Plex-Session-Identifier': createClientIdentifier() }
+        })
+        written.progress++
+      } catch (error: any) {
+        skipped.progress++
+        issues.push({
+          scope: 'progress',
+          status: 'warning',
+          media: record.media,
+          reason: `Plex could not update this resume point: ${errorDetail(error?.body, error?.message)}`
+        })
+      }
+    }
+    confirmedScopes.push('progress')
+    logTo(log, `Updated ${written.progress} Plex resume points.`)
+  }
+
+  if (scopes.library && bundle.library.length) {
+    skipped.library = bundle.library.length
+    issues.push({
+      scope: 'library',
+      status: 'note',
+      reason: 'Plex server libraries are read-only in Sync Bridge because adding a title requires adding its media files to the server.'
+    })
+  }
+
+  plexCatalogCache.delete(connection.credentials)
+  return { written, skipped, issues, confirmedScopes }
 }
 
 function mediaFromTrakt(value: any, kind: 'movie' | 'series'): MediaRef {
@@ -2484,6 +3116,7 @@ async function targetEpisodesFor(
   }
   if (connection.service === 'nuvio') return nuvioTargetEpisodes(connection, media)
   if (connection.service === 'trakt') return traktTargetEpisodes(connection, media)
+  if (connection.service === 'plex') return plexTargetEpisodes(connection, media)
   return []
 }
 
@@ -2499,7 +3132,7 @@ export async function inspectDestinationMappings(
   log?: BridgeLog,
   sourceConnection?: BridgeConnection
 ): Promise<DestinationMappingIssue[]> {
-  if (!['stremio', 'nuvio', 'trakt'].includes(connection.service)) return []
+  if (!['stremio', 'nuvio', 'trakt', 'plex'].includes(connection.service)) return []
   const records: Array<{
     scope: 'history' | 'progress'
     media: MediaRef
@@ -2537,7 +3170,9 @@ export async function inspectDestinationMappings(
         ? 'Stremio has no episode metadata for this series; its watched bitfield cannot be encoded safely.'
         : connection.service === 'nuvio'
           ? 'Nuvio has no episode metadata for this series; its episode state cannot be mapped safely.'
-          : 'Trakt has no episode metadata for this series; its episode state cannot be mapped safely.'
+          : connection.service === 'plex'
+            ? 'Plex does not contain a matching episode on the selected server.'
+            : 'Trakt has no episode metadata for this series; its episode state cannot be mapped safely.'
       return {
         scope: record.scope,
         sourceMedia: record.media,
@@ -2640,6 +3275,7 @@ export async function pullMediaBridge(options: PullOptions): Promise<PullResult>
     case 'nuvio': return pullNuvio(options)
     case 'simkl': return pullSimkl(options)
     case 'stremio': return pullStremio(options)
+    case 'plex': return pullPlex(options)
   }
 }
 
@@ -2649,6 +3285,7 @@ export async function pushMediaBridge(options: PushOptions): Promise<PushResult>
     case 'nuvio': return pushNuvio(options)
     case 'simkl': return pushSimkl(options)
     case 'stremio': return pushStremio(options)
+    case 'plex': return pushPlex(options)
   }
 }
 
@@ -2684,5 +3321,44 @@ export function createStremioConnection(
     accountId: login.accountId,
     displayName: login.displayName,
     credentials: { service: 'stremio', authKey: login.authKey }
+  }
+}
+
+export function createPlexConnection(
+  slot: BridgeSlot,
+  login: Awaited<ReturnType<typeof signInPlex>>,
+  serverId = login.servers[0]?.id
+): BridgeConnection {
+  const server = login.servers.find(item => item.id === serverId) || login.servers[0]
+  if (!server) throw new Error('Choose a reachable Plex Media Server.')
+  return {
+    slot,
+    service: 'plex',
+    accountId: login.accountId,
+    serverId: server.id,
+    displayName: `${login.displayName} · ${server.name}`,
+    servers: login.servers,
+    credentials: {
+      service: 'plex',
+      accountToken: login.accountToken,
+      clientIdentifier: login.clientIdentifier,
+      server
+    }
+  }
+}
+
+export function selectPlexServer(
+  connection: BridgeConnection,
+  serverId: string
+): BridgeConnection {
+  if (connection.credentials.service !== 'plex') throw new Error('Expected Plex credentials.')
+  const server = connection.servers?.find(item => item.id === serverId)
+  if (!server) throw new Error('The selected Plex server is no longer available.')
+  const accountName = String(connection.displayName || connection.accountId).split(' · ')[0]
+  return {
+    ...connection,
+    serverId: server.id,
+    displayName: `${accountName} · ${server.name}`,
+    credentials: { ...connection.credentials, server }
   }
 }

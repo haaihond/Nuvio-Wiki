@@ -37,11 +37,11 @@ function movie(ids: MediaRef['ids'], title = 'Movie'): MediaRef {
   return { kind: 'movie', ids, title, year: 2024 }
 }
 
-test('defines four complete services and generates every directional pair', () => {
-  assert.deepEqual(SERVICE_IDS, ['simkl', 'stremio', 'trakt', 'nuvio'])
-  assert.equal(generateRoutePairs().length, 16)
-  assert.equal(ROUTE_PAIRS.length, 16)
-  assert.equal(new Set(ROUTE_PAIRS.map(route => route.id)).size, 16)
+test('defines five services and generates every directional pair', () => {
+  assert.deepEqual(SERVICE_IDS, ['simkl', 'stremio', 'trakt', 'plex', 'nuvio'])
+  assert.equal(generateRoutePairs().length, 25)
+  assert.equal(ROUTE_PAIRS.length, 25)
+  assert.equal(new Set(ROUTE_PAIRS.map(route => route.id)).size, 25)
 
   for (const service of SERVICE_IDS) {
     assert.equal(SERVICE_DEFINITIONS[service].id, service)
@@ -50,16 +50,19 @@ test('defines four complete services and generates every directional pair', () =
       progress: true,
       library: true
     })
-    assert.deepEqual(SERVICE_DEFINITIONS[service].capabilities.write, {
-      history: true,
-      progress: true,
-      library: true
-    })
+    assert.deepEqual(SERVICE_DEFINITIONS[service].capabilities.write, service === 'plex'
+      ? { history: true, progress: true, library: false }
+      : { history: true, progress: true, library: true })
   }
 
-  assert.equal(ROUTE_PAIRS.filter(route => route.sameService).length, 4)
+  assert.equal(ROUTE_PAIRS.filter(route => route.sameService).length, 5)
   assert.equal(summarizeRoute('simkl', 'nuvio').label, 'Simkl → Nuvio')
   assert.equal(summarizeRoute('simkl', 'nuvio').enabledScopeCount, 3)
+  assert.deepEqual(summarizeRoute('trakt', 'plex').scopes.map(scope => [scope.scope, scope.supported]), [
+    ['history', true],
+    ['progress', true],
+    ['library', false]
+  ])
 })
 
 test('blocks identical same-service endpoints but allows distinct accounts and services', () => {
@@ -101,6 +104,20 @@ test('allows Nuvio profiles on one account only when profile identities differ',
   )
   assert.equal(missingProfile.valid, false)
   assert.equal(missingProfile.code, 'profile_required')
+})
+
+test('allows one Plex account to bridge between distinct servers', () => {
+  assert.equal(validateEndpointPair(
+    { ...endpoint('source', 'plex', 'user-1'), serverId: 'server-a' },
+    { ...endpoint('destination', 'plex', 'user-1'), serverId: 'server-b' }
+  ).valid, true)
+
+  const sameServer = validateEndpointPair(
+    { ...endpoint('source', 'plex', 'user-1'), serverId: 'server-a' },
+    { ...endpoint('destination', 'plex', 'USER-1'), serverId: 'SERVER-A' }
+  )
+  assert.equal(sameServer.valid, false)
+  assert.equal(sameServer.code, 'same_endpoint')
 })
 
 test('builds canonical keys by stable ID priority and episode coordinates', () => {

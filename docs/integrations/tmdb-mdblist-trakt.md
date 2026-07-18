@@ -77,7 +77,9 @@ After authenticating, customize your tracking features.
 
 #### Sync Bridge
 
-Use the web-based Sync Bridge to preview and transfer supported tracking data in any direction between **Simkl**, **Stremio**, **Trakt**, and **Nuvio**. Every source and destination pairing is available, including transfers between different accounts on the same service or different profiles within Nuvio.
+Use the web-based Sync Bridge to preview and transfer supported tracking data between **Simkl**, **Stremio**, **Trakt**, **Plex**, and **Nuvio**. Every source and destination pairing is available, including transfers between different accounts on the same service, different profiles within Nuvio, or different Plex servers on one account.
+
+Plex connects through Plex's approval screen and lets you choose any reachable server on the account. The bridge can read watched items, resume points, and movie/show library membership from that server. As a destination, Plex accepts watched state and resume points only for media already present on the selected server; Sync Bridge cannot add media files or saved titles to a Plex server library.
 
 <NuvioTraktBridge />
 
@@ -85,7 +87,7 @@ Use the web-based Sync Bridge to preview and transfer supported tracking data in
 
 1. Open the [Sync Bridge](/tools#sync-bridge).
 2. Choose the **From** and **To** services.
-3. Connect the source and destination separately. For a same-service transfer, use different accounts; for Nuvio, choose a different destination account or profile.
+3. Connect the source and destination separately. For a same-service transfer, use different accounts; for Nuvio, choose a different destination account or profile; for Plex, you can also choose a different server.
 4. Select the data categories available for that pairing, such as watched history, playback progress, watchlist, or collection.
 5. Run **Preview** first. Review matched items, automatic ID and episode remapping, skipped items, and any warnings before writing to the destination.
 6. Once the preview looks right, start the sync and keep the page open until it finishes.
