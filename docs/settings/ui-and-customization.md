@@ -13,6 +13,7 @@ Whether you are swiping through catalogs on a phone or navigating with a remote 
 * **OLED/AMOLED Settings:** A straightforward *AMOLED Black* toggle enables pure black backgrounds to save battery and reduce eye strain.
 
 ### TV App
+* **Settings Style:** Choose how the settings screens are presented across the app (*Default* cards, *Minimal* flat layout, or *Top Bar* navigation tabs).
 * **OLED/AMOLED Settings:** Granular control is available — enable *AMOLED Mode* for the background layer, and separately toggle *Pure Black Surfaces* for interactive elements like cards, panels, and containers.
 * **Typography:** Adjust the *App Font* (e.g., Inter) to optimize legibility for large-screen reading.
 
@@ -35,11 +36,13 @@ Whether you are swiping through catalogs on a phone or navigating with a remote 
 * **Modern View Layout:** The top half of the screen acts as a dynamic hero section. As you navigate through catalogs, the currently focused poster expands into this top area, displaying its full backdrop, metadata, and synopsis. The rest of the catalog remains in a horizontal row below.
 * **Classic View Layout:** Features a traditional, rotating Hero Carousel at the very top of the home screen. As you scroll down into the standard horizontal rows, the UI prioritizes the catalogs—focused posters do not dynamically expand or replace the background.
 * **Grid View Layout:** Functions similarly to the Classic view, featuring the same rotating Hero Carousel at the top of the screen. However, instead of horizontal rows, it organizes the catalog into a wrapping, vertical-scrolling grid format below the hero.
+* **Focused Item Gradient:** When using Classic or Grid view, toggle this to blend artwork colors smoothly into the right side of the home screen.
 * **Fullscreen Hero Backdrop:** Toggle this setting to allow the hero image or focused poster to take up the entire background canvas of the screen.
-* **Navigation & Sidebar:** Enable a floating *Modern Sidebar* and opt to *Collapse Sidebar* by default to maximize poster screen real estate.
+* **Navigation & Sidebar:** Enable a floating *Modern Sidebar* and opt to *Collapse Sidebar* by default to maximize poster screen real estate. You can also toggle **Show/Hide Discover** to add a dedicated browsing section, and use **Discover Location** to place it either in *Search* or in the *Side Panel*.
 * **Focused Poster Behavior:** Adjust the *Backdrop Expand Delay* slider (e.g., 3s) to control how long the app waits before expanding a focused card into the backdrop (primarily used in Modern View).
 * **Home Screen Trailers:** Enable *Autoplay Trailer* to automatically play previews for focused content when available directly on the home screen.
 * **Catalog Details:** A *Show Catalog Type* option displays Movie/Series suffixes next to titles.
+* **Card Depth Effect:** Add a 3D aesthetic to your posters. Enable depth to add a soft sheen and a lit top edge to image cards. You can use the *Fine-tune* option to manually adjust Edge Glow, Top Sheen, and Edge Coverage percentages, and explicitly apply these effects to Posters, Continue Watching, Episode cards, Cast, or Trailers.
 
 [Back to top](#cross-platform-ui-and-customization-guide)
 
