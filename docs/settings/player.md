@@ -127,6 +127,7 @@ These configurations control which text translations are displayed on screen and
 - **Subtitle Styling** [TV Optimized]: Offers granular control over subtitle aesthetics including **Size (Scaling)**, **Vertical Offset** (to accommodate letterboxing), **Text Color**, **Background Color**, and **Outline/Outline Color**.
 - **Use libass for ASS/SSA subtitles:** An experimental toggle to use the advanced libass engine for rendering complex styles, positioning, and animations of ASS/SSA subtitles.
   - Turning this on tells the player to use a specialized graphics engine (libass) to draw complex subtitles perfectly. If left off, the player might strip out all the colors and placement formatting, or worse, crash trying to read the file.
+  - *Libass Render Mode* [Android TV Only]: When libass is enabled, select the exact rendering pipeline: *Overlay OpenGL* (Recommended for best quality and HDR support), *Overlay Canvas* (HDR support without OpenGL), *Effects OpenGL* (Animation support with Media3 effects), *Effects Canvas*, or *Standard Cues* (Basic subtitle rendering without animation).
 
 ### Addon Subtitle Startup
 Controls how aggressively Nuvio searches for external subtitles when a video begins playing, balancing load times against availability.
@@ -148,7 +149,7 @@ Controls the visual experience and interactions within the media player.
 - **OSD Clock** [Android TV Only]: Shows the current time and estimated end time while the transport controls are visible on screen.
 - **Player:** Dictates which video engine handles your streams.
   - *Internal:* Keeps you inside Nuvio using its native player.
-  - *Internal Engine:* Choose between ExoPlayer or libmpv as the primary renderer.
+  - *Internal Engine:* Choose between **ExoPlayer**, **Libmpv (Beta)**, or **Auto (Best for Content)** (automatically uses ExoPlayer for Movies/TV Shows and MPV for Anime).
   - *Auto-switch engine on startup error* [Android TV Only]: Automatically falls back from ExoPlayer to libmpv for detected anime or if a stream fails to initialize.
   - *External:* Passes the video link to a third-party application installed on your device (e.g., VLC, MX Player).
 - **Hold To Speed** [Mobile Only]: A touch-screen shortcut for skimming. Pressing and holding anywhere on the video player temporarily increases playback speed. Normal playback resumes when released.
