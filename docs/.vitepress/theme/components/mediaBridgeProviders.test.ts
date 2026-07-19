@@ -5,6 +5,7 @@ import {
   pullMediaBridge,
   pullMediaBridgeForVerification,
   pushMediaBridge,
+  signInJellyfin,
   type BridgeConnection
 } from './mediaBridgeProviders.ts'
 
@@ -72,6 +73,25 @@ function plexConnection(slot: 'source' | 'destination' = 'destination'): BridgeC
         accessToken: 'server-token',
         owned: true
       }
+    }
+  }
+}
+
+function jellyfinConnection(slot: 'source' | 'destination' = 'destination'): BridgeConnection {
+  return {
+    slot,
+    service: 'jellyfin',
+    accountId: 'jellyfin-user',
+    serverId: 'jellyfin-server',
+    displayName: 'Jellyfin User · Test Server',
+    credentials: {
+      service: 'jellyfin',
+      baseUrl: 'https://jellyfin.test',
+      accessToken: 'jellyfin-token',
+      userId: 'jellyfin-user',
+      serverId: 'jellyfin-server',
+      serverName: 'Test Server',
+      deviceId: 'test-device'
     }
   }
 }
@@ -307,6 +327,222 @@ test('only reports omitted Trakt replay timestamps when Trakt is the source', as
   assert.equal(source.issues.length, 1)
   assert.match(source.issues[0].reason, /2 earlier play events cannot be transferred/)
   assert.deepEqual(destination.issues, [])
+})
+
+test('signs in to a Jellyfin server without keeping the password in the connection result', async t => {
+  let authorization = ''
+  let body: any = null
+  t.mock.method(globalThis, 'fetch', async (input, init) => {
+    const url = new URL(String(input))
+    assert.equal(url.pathname, '/jellyfin/Users/AuthenticateByName')
+    authorization = new Headers(init?.headers).get('Authorization') || ''
+    body = JSON.parse(String(init?.body || '{}'))
+    return Response.json({
+      AccessToken: 'returned-token',
+      ServerId: 'server-id',
+      User: {
+        Id: 'user-id',
+        Name: 'Jellyfin User',
+        ServerName: 'Home Server'
+      }
+    })
+  })
+
+  const login = await signInJellyfin(
+    'https://jellyfin.test/jellyfin/web/',
+    'Jellyfin User',
+    'secret'
+  )
+
+  assert.match(authorization, /^MediaBrowser /)
+  assert.deepEqual(body, { Username: 'Jellyfin User', Pw: 'secret' })
+  assert.equal(login.baseUrl, 'https://jellyfin.test/jellyfin')
+  assert.equal(login.accessToken, 'returned-token')
+  assert.equal(login.userId, 'user-id')
+  assert.equal(login.serverId, 'server-id')
+  assert.equal('password' in login, false)
+})
+
+test('reads watched state, resume points, and server-library membership from Jellyfin', async t => {
+  t.mock.method(globalThis, 'fetch', async (input, init) => {
+    const url = new URL(String(input))
+    assert.equal(url.pathname, '/Items')
+    assert.equal(url.searchParams.get('IncludeItemTypes'), 'Movie,Series,Episode')
+    const headers = new Headers(init?.headers)
+    assert.equal(headers.get('X-Emby-Token'), 'jellyfin-token')
+    return Response.json({
+      TotalRecordCount: 3,
+      Items: [{
+        Id: 'movie-101',
+        Type: 'Movie',
+        Name: 'Guardians of the Galaxy',
+        ProductionYear: 2014,
+        DateCreated: '2023-11-14T22:13:20Z',
+        RunTimeTicks: 72_000_000_000,
+        ProviderIds: { Imdb: 'tt2015381', Tmdb: '118340' },
+        UserData: {
+          Played: true,
+          PlayCount: 2,
+          LastPlayedDate: '2024-07-03T09:46:40Z',
+          PlaybackPositionTicks: 12_000_000_000
+        }
+      }, {
+        Id: 'show-200',
+        Type: 'Series',
+        Name: 'Game of Thrones',
+        ProductionYear: 2011,
+        DateCreated: '2023-11-14T22:13:20Z',
+        ProviderIds: { Imdb: 'tt0944947', Tvdb: '121361' },
+        UserData: {}
+      }, {
+        Id: 'episode-203',
+        Type: 'Episode',
+        SeriesId: 'show-200',
+        SeriesName: 'Game of Thrones',
+        ParentIndexNumber: 2,
+        IndexNumber: 3,
+        Name: 'What Is Dead May Never Die',
+        RunTimeTicks: 36_000_000_000,
+        UserData: {
+          Played: true,
+          PlayCount: 1,
+          LastPlayedDate: '2024-07-04T09:46:40Z'
+        }
+      }]
+    })
+  })
+
+  const result = await pullMediaBridge({
+    connection: jellyfinConnection('source'),
+    scopes: { history: true, progress: true, library: true }
+  })
+
+  assert.equal(result.bundle.history.length, 2)
+  const movie = result.bundle.history.find(record => record.media.kind === 'movie')
+  assert.equal(movie?.media.ids.imdb, 'tt2015381')
+  assert.equal(result.bundle.progress.length, 1)
+  assert.equal(result.bundle.progress[0].positionMs, 1_200_000)
+  assert.equal(result.bundle.library.length, 2)
+  assert.equal(result.bundle.library[0].lists[0].name, 'Test Server')
+  const episode = result.bundle.history.find(record => record.media.episode === 3)
+  assert.equal(episode?.media.ids.imdb, 'tt0944947')
+  assert.equal(episode?.media.videoId, 'jellyfin:episode-203')
+})
+
+test('writes Jellyfin watched state and resume points only for media already on the server', async t => {
+  const writes: Array<{ path: string; method: string; body: any }> = []
+  t.mock.method(globalThis, 'fetch', async (input, init) => {
+    const url = new URL(String(input))
+    if (url.pathname === '/Items') {
+      return Response.json({
+        TotalRecordCount: 1,
+        Items: [{
+          Id: 'movie-101',
+          Type: 'Movie',
+          Name: 'Almost Finished',
+          ProductionYear: 2024,
+          RunTimeTicks: 72_000_000_000,
+          ProviderIds: { Imdb: 'tt2015381' },
+          UserData: { Played: false, PlayCount: 0, IsFavorite: true }
+        }]
+      })
+    }
+    if (url.pathname === '/UserPlayedItems/movie-101' || url.pathname === '/UserItems/movie-101/UserData') {
+      writes.push({
+        path: url.pathname,
+        method: String(init?.method || 'GET'),
+        body: init?.body ? JSON.parse(String(init.body)) : null
+      })
+      return Response.json({ ItemId: 'movie-101' })
+    }
+    throw new Error(`Unexpected Jellyfin request: ${url}`)
+  })
+
+  const bundle = createEmptyBundle()
+  bundle.history.push(movieHistory('Almost Finished', 'tt2015381', Date.UTC(2026, 6, 17)))
+  bundle.progress.push(movieProgress(50))
+  bundle.library.push({
+    media: { kind: 'movie', ids: { imdb: 'tt9999999' }, title: 'Missing' },
+    addedAt: Date.UTC(2026, 6, 17),
+    lists: [{ service: 'trakt', kind: 'watchlist' }]
+  })
+
+  const result = await pushMediaBridge({
+    connection: jellyfinConnection(),
+    bundle,
+    scopes: { history: true, progress: true, library: true }
+  })
+
+  assert.deepEqual(writes.map(write => [write.path, write.method]), [
+    ['/UserPlayedItems/movie-101', 'POST'],
+    ['/UserItems/movie-101/UserData', 'POST']
+  ])
+  assert.equal(writes[1].body.PlaybackPositionTicks, 36_000_000_000)
+  assert.equal(writes[1].body.IsFavorite, true)
+  assert.deepEqual(result.written, { history: 1, progress: 1, library: 0 })
+  assert.equal(result.skipped?.library, 1)
+  assert.deepEqual(result.confirmedScopes, ['history', 'progress'])
+  assert.match(result.issues[0].reason, /read-only/)
+})
+
+test('maps series episodes to Jellyfin item IDs before marking them watched', async t => {
+  let playedItemId = ''
+  t.mock.method(globalThis, 'fetch', async (input, init) => {
+    const url = new URL(String(input))
+    if (url.pathname === '/Items') {
+      return Response.json({
+        TotalRecordCount: 2,
+        Items: [{
+          Id: 'show-200',
+          Type: 'Series',
+          Name: 'Game of Thrones',
+          ProductionYear: 2011,
+          ProviderIds: { Imdb: 'tt0944947' },
+          UserData: {}
+        }, {
+          Id: 'episode-203',
+          Type: 'Episode',
+          SeriesId: 'show-200',
+          SeriesName: 'Game of Thrones',
+          ParentIndexNumber: 2,
+          IndexNumber: 3,
+          Name: 'What Is Dead May Never Die',
+          UserData: {}
+        }]
+      })
+    }
+    if (url.pathname === '/UserPlayedItems/episode-203') {
+      assert.equal(init?.method, 'POST')
+      playedItemId = url.pathname.split('/').at(-1) || ''
+      return Response.json({ ItemId: 'episode-203', Played: true })
+    }
+    throw new Error(`Unexpected Jellyfin request: ${url}`)
+  })
+
+  const bundle = createEmptyBundle()
+  bundle.history.push({
+    media: {
+      kind: 'series',
+      ids: { imdb: 'tt0944947' },
+      title: 'Game of Thrones',
+      year: 2011,
+      season: 2,
+      episode: 3,
+      episodeTitle: 'What Is Dead May Never Die'
+    },
+    watchedAt: Date.UTC(2026, 6, 17),
+    playCount: 1
+  })
+
+  const result = await pushMediaBridge({
+    connection: jellyfinConnection(),
+    bundle,
+    scopes: { history: true, progress: false, library: false }
+  })
+
+  assert.equal(playedItemId, 'episode-203')
+  assert.equal(result.written.history, 1)
+  assert.deepEqual(result.issues, [])
 })
 
 test('reads watched state, resume points, and server-library membership from Plex', async t => {

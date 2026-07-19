@@ -30,6 +30,8 @@ const STREMIO_API = 'https://api.strem.io/api'
 const PLEX_TV_API = 'https://plex.tv/api/v2'
 const PLEX_CLIENTS_API = 'https://clients.plex.tv/api/v2'
 const PLEX_PRODUCT = 'Nuvio Wiki Sync Bridge'
+const JELLYFIN_CLIENT = 'Nuvio Wiki Sync Bridge'
+const JELLYFIN_VERSION = '1.0.0'
 const CINEMETA_API = 'https://v3-cinemeta.strem.io'
 const NUVIO_API = 'https://api.nuvio.tv'
 const TRAKT_MAX_RESUME_PROGRESS = 79
@@ -55,7 +57,7 @@ const STANDARD_MEDIA_ID_KEYS = new Set([
   'tvdb', 'tvdb_id',
   'trakt', 'trakt_id', 'traktslug',
   'simkl', 'simkl_id',
-  'plex', 'stremio', 'slug', 'external'
+  'plex', 'jellyfin', 'stremio', 'slug', 'external'
 ])
 
 const EXTERNAL_ID_NAMESPACE_ALIASES: Record<string, string> = {
@@ -132,11 +134,22 @@ export interface PlexCredentials {
   server: PlexServer
 }
 
+export interface JellyfinCredentials {
+  service: 'jellyfin'
+  baseUrl: string
+  accessToken: string
+  userId: string
+  serverId: string
+  serverName: string
+  deviceId: string
+}
+
 export type BridgeCredentials =
   | TraktCredentials
   | SimklCredentials
   | StremioCredentials
   | PlexCredentials
+  | JellyfinCredentials
   | NuvioCredentials
 
 export interface BridgeConnection extends ConnectedEndpoint {
@@ -387,6 +400,7 @@ function normalizeIds(raw: any, slugService?: 'trakt' | 'simkl'): MediaIds {
     ids.slug = String(raw.traktslug || raw.slug)
   }
   if (raw.stremio) ids.stremio = String(raw.stremio)
+  if (raw.jellyfin) ids.jellyfin = String(raw.jellyfin)
   const external: Record<string, string | number> = {}
   if (slugService === 'simkl' && raw.slug) external.simklslug = String(raw.slug)
   for (const source of [raw.external, raw]) {
@@ -887,6 +901,178 @@ async function plexGetAll(
     output.push(...rows)
     const container = data?.MediaContainer || data || {}
     const total = Number(container.totalSize || container.size || 0)
+    if (!rows.length || rows.length < size || (total && output.length >= total)) break
+  }
+  return output
+}
+
+function jellyfinAuthorization(deviceId: string, token?: string): string {
+  const escapeValue = (value: string) => value.replace(/[\\"\u0000-\u001f\u007f]/g, '')
+  const fields = [
+    `Client="${escapeValue(JELLYFIN_CLIENT)}"`,
+    'Device="Browser"',
+    `DeviceId="${escapeValue(deviceId)}"`,
+    `Version="${escapeValue(JELLYFIN_VERSION)}"`
+  ]
+  if (token) fields.push(`Token="${escapeValue(token)}"`)
+  return `MediaBrowser ${fields.join(', ')}`
+}
+
+function jellyfinHeaders(deviceId: string, token?: string): Record<string, string> {
+  return {
+    Accept: 'application/json',
+    Authorization: jellyfinAuthorization(deviceId, token),
+    ...(token ? { 'X-Emby-Token': token } : {})
+  }
+}
+
+function normalizeJellyfinBaseUrl(value: string): string {
+  const raw = value.trim()
+  if (!raw) throw new Error('Enter the Jellyfin server URL.')
+  let url: URL
+  try {
+    url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`)
+  } catch {
+    throw new Error('Enter a valid Jellyfin server URL.')
+  }
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
+    throw new Error('Use an HTTP or HTTPS Jellyfin server URL without embedded credentials.')
+  }
+  url.search = ''
+  url.hash = ''
+  url.pathname = url.pathname
+    .replace(/\/web(?:\/index\.html)?\/?$/i, '')
+    .replace(/\/+$/, '')
+  const loopback = ['localhost', '127.0.0.1', '[::1]', '::1'].includes(url.hostname.toLowerCase())
+  if (
+    typeof window !== 'undefined'
+    && window.location.protocol === 'https:'
+    && url.protocol === 'http:'
+    && !loopback
+  ) {
+    throw new Error('This HTTPS page can connect only to an HTTPS Jellyfin URL (except a loopback server).')
+  }
+  return url.toString().replace(/\/+$/, '')
+}
+
+export async function signInJellyfin(
+  serverUrl: string,
+  username: string,
+  password: string
+): Promise<{
+  baseUrl: string
+  accessToken: string
+  userId: string
+  serverId: string
+  serverName: string
+  deviceId: string
+  displayName: string
+}> {
+  const baseUrl = normalizeJellyfinBaseUrl(serverUrl)
+  const deviceId = createClientIdentifier()
+  let data: any
+  try {
+    data = (await requestBridgeJson(`${baseUrl}/Users/AuthenticateByName`, {
+      method: 'POST',
+      headers: {
+        ...jellyfinHeaders(deviceId),
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ Username: username.trim(), Pw: password })
+    })).data
+  } catch (error: any) {
+    if (error?.status) throw error
+    throw new Error(
+      'The Jellyfin server could not be reached from this browser. Check its public HTTPS URL and cross-origin access.'
+    )
+  }
+  const user = data?.User || data?.user || {}
+  const accessToken = String(data?.AccessToken || data?.accessToken || '')
+  const userId = String(user?.Id || user?.id || '')
+  if (!accessToken || !userId) throw new Error('Jellyfin returned an incomplete authenticated session.')
+
+  let serverId = String(data?.ServerId || data?.serverId || user?.ServerId || user?.serverId || '')
+  let serverName = String(user?.ServerName || user?.serverName || '')
+  if (!serverId || !serverName) {
+    try {
+      const info = (await requestBridgeJson(`${baseUrl}/System/Info/Public`, {
+        headers: jellyfinHeaders(deviceId, accessToken)
+      })).data
+      serverId ||= String(info?.Id || info?.id || '')
+      serverName ||= String(info?.ServerName || info?.serverName || '')
+    } catch {
+      // Authentication already proved the server is reachable; use stable fallbacks below.
+    }
+  }
+  serverId ||= baseUrl.toLocaleLowerCase('en-US')
+  serverName ||= new URL(baseUrl).hostname
+  const displayName = String(user?.Name || user?.name || username.trim() || userId)
+  return { baseUrl, accessToken, userId, serverId, serverName, deviceId, displayName }
+}
+
+async function jellyfinRequest(
+  connection: BridgeConnection,
+  path: string,
+  params: Record<string, any> = {},
+  options: RequestInit = {}
+): Promise<JsonResponse> {
+  if (connection.credentials.service !== 'jellyfin') throw new Error('Expected Jellyfin credentials.')
+  const url = new URL(`${connection.credentials.baseUrl}${path.startsWith('/') ? path : `/${path}`}`)
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value))
+  }
+  return requestBridgeJson(url.toString(), {
+    ...options,
+    headers: {
+      ...jellyfinHeaders(connection.credentials.deviceId, connection.credentials.accessToken),
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(options.headers || {})
+    }
+  })
+}
+
+async function jellyfinRequestWithLegacy(
+  connection: BridgeConnection,
+  path: string,
+  legacyPath: string,
+  params: Record<string, any> = {},
+  options: RequestInit = {}
+): Promise<JsonResponse> {
+  try {
+    return await jellyfinRequest(connection, path, params, options)
+  } catch (error: any) {
+    if (error?.status !== 404 || path === legacyPath) throw error
+    return jellyfinRequest(connection, legacyPath, params, options)
+  }
+}
+
+function jellyfinRows(data: any): any[] {
+  return Array.isArray(data?.Items)
+    ? data.Items
+    : Array.isArray(data?.items)
+      ? data.items
+      : Array.isArray(data)
+        ? data
+        : []
+}
+
+async function jellyfinGetAll(
+  connection: BridgeConnection,
+  path: string,
+  params: Record<string, any> = {},
+  legacyPath = path
+): Promise<any[]> {
+  const output: any[] = []
+  const size = 500
+  for (let start = 0; start < 100_000; start += size) {
+    const { data } = await jellyfinRequestWithLegacy(connection, path, legacyPath, {
+      ...params,
+      StartIndex: start,
+      Limit: size
+    })
+    const rows = jellyfinRows(data)
+    output.push(...rows)
+    const total = Number(data?.TotalRecordCount ?? data?.totalRecordCount ?? 0)
     if (!rows.length || rows.length < size || (total && output.length >= total)) break
   }
   return output
@@ -1473,6 +1659,449 @@ async function pushPlex(options: PushOptions): Promise<PushResult> {
   }
 
   plexCatalogCache.delete(connection.credentials)
+  return { written, skipped, issues, confirmedScopes }
+}
+
+interface JellyfinCatalogEntry {
+  media: MediaRef
+  itemId: string
+  addedAt: number
+  updatedAt: number
+  lastPlayedAt: number
+  playCount: number
+  played: boolean
+  playbackPositionTicks: number
+  runTimeTicks: number
+  userData: Record<string, any>
+}
+
+interface JellyfinCatalog {
+  movies: JellyfinCatalogEntry[]
+  shows: JellyfinCatalogEntry[]
+  episodes: JellyfinCatalogEntry[]
+}
+
+function jellyfinProviderIds(value: any, parent?: any): MediaIds {
+  const identity = parent || value
+  const raw = identity?.ProviderIds || identity?.providerIds || {}
+  const normalized: Record<string, any> = {}
+  for (const [key, id] of Object.entries(raw)) normalized[key.toLowerCase()] = id
+  const ids = normalizeIds(normalized)
+  const itemId = String(identity?.Id || identity?.id || '')
+  if (itemId) ids.jellyfin = `item:${itemId}`
+  return ids
+}
+
+function jellyfinCatalogEntry(
+  value: any,
+  kind: 'movie' | 'series',
+  parent?: any
+): JellyfinCatalogEntry | null {
+  const itemId = String(value?.Id || value?.id || '')
+  if (!itemId) return null
+  const identity = parent || value
+  const userData = value?.UserData || value?.userData || {}
+  const type = String(value?.Type || value?.type || '').toLowerCase()
+  const addedAt = asEpochMs(value?.DateCreated || value?.dateCreated)
+  const lastPlayedAt = asEpochMs(userData?.LastPlayedDate || userData?.lastPlayedDate)
+  const updatedAt = lastPlayedAt || asEpochMs(
+    value?.DateLastSaved || value?.dateLastSaved || value?.DateCreated || value?.dateCreated
+  )
+  const media: MediaRef = {
+    kind,
+    ids: jellyfinProviderIds(value, parent),
+    title: String(identity?.Name || identity?.name || value?.SeriesName || value?.seriesName || ''),
+    year: Number(identity?.ProductionYear || identity?.productionYear) || undefined
+  }
+  if (type === 'episode') {
+    media.season = Number(value?.ParentIndexNumber ?? value?.parentIndexNumber)
+    media.episode = Number(value?.IndexNumber ?? value?.indexNumber)
+    media.episodeTitle = String(value?.Name || value?.name || '') || undefined
+    media.videoId = `jellyfin:${itemId}`
+  }
+  return {
+    media,
+    itemId,
+    addedAt,
+    updatedAt,
+    lastPlayedAt,
+    playCount: Math.max(0, Number(userData?.PlayCount ?? userData?.playCount) || 0),
+    played: Boolean(userData?.Played ?? userData?.played),
+    playbackPositionTicks: Math.max(
+      0,
+      Number(userData?.PlaybackPositionTicks ?? userData?.playbackPositionTicks) || 0
+    ),
+    runTimeTicks: Math.max(0, Number(value?.RunTimeTicks ?? value?.runTimeTicks) || 0),
+    userData: { ...userData }
+  }
+}
+
+const jellyfinCatalogCache = new WeakMap<object, {
+  expiresAt: number
+  promise: Promise<JellyfinCatalog>
+}>()
+
+async function loadJellyfinCatalog(
+  connection: BridgeConnection,
+  log?: BridgeLog
+): Promise<JellyfinCatalog> {
+  if (connection.credentials.service !== 'jellyfin') throw new Error('Expected Jellyfin credentials.')
+  const cached = jellyfinCatalogCache.get(connection.credentials)
+  if (cached && cached.expiresAt > Date.now()) return cached.promise
+
+  const promise = (async () => {
+    logTo(log, `Indexing the Jellyfin library on ${connection.credentials.serverName}...`)
+    const rows = await jellyfinGetAll(connection, '/Items', {
+      UserId: connection.credentials.userId,
+      Recursive: true,
+      IncludeItemTypes: 'Movie,Series,Episode',
+      Fields: 'ProviderIds,DateCreated',
+      ExcludeLocationTypes: 'Virtual',
+      EnableUserData: true,
+      EnableImages: false,
+      CollapseBoxSetItems: false,
+      EnableTotalRecordCount: true
+    }, `/Users/${encodeURIComponent(connection.credentials.userId)}/Items`)
+    const showsById = new Map<string, any>()
+    for (const row of rows) {
+      if (String(row?.Type || row?.type || '').toLowerCase() === 'series') {
+        showsById.set(String(row?.Id || row?.id || ''), row)
+      }
+    }
+    const movies: JellyfinCatalogEntry[] = []
+    const shows: JellyfinCatalogEntry[] = []
+    const episodes: JellyfinCatalogEntry[] = []
+    for (const row of rows) {
+      const type = String(row?.Type || row?.type || '').toLowerCase()
+      if (type === 'movie') {
+        const entry = jellyfinCatalogEntry(row, 'movie')
+        if (entry) movies.push(entry)
+      } else if (type === 'series') {
+        const entry = jellyfinCatalogEntry(row, 'series')
+        if (entry) shows.push(entry)
+      } else if (type === 'episode') {
+        const seriesId = String(row?.SeriesId || row?.seriesId || '')
+        const parent = showsById.get(seriesId) || {
+          Id: seriesId,
+          Name: row?.SeriesName || row?.seriesName,
+          ProductionYear: row?.ProductionYear || row?.productionYear
+        }
+        const entry = jellyfinCatalogEntry(row, 'series', parent)
+        if (entry && Number.isInteger(entry.media.season) && Number.isInteger(entry.media.episode)) {
+          episodes.push(entry)
+        }
+      }
+    }
+    logTo(log, `Indexed ${movies.length} Jellyfin movies, ${shows.length} shows, and ${episodes.length} episodes.`)
+    return { movies, shows, episodes }
+  })()
+
+  jellyfinCatalogCache.set(connection.credentials, { expiresAt: Date.now() + 30_000, promise })
+  try {
+    return await promise
+  } catch (error) {
+    jellyfinCatalogCache.delete(connection.credentials)
+    throw error
+  }
+}
+
+function jellyfinCandidates(
+  media: MediaRef,
+  entries: readonly JellyfinCatalogEntry[]
+): JellyfinCatalogEntry[] {
+  const aliases = new Set(mediaAliasKeys(media))
+  if (aliases.size) {
+    const exact = entries.filter(entry => mediaAliasKeys(entry.media).some(alias => aliases.has(alias)))
+    if (exact.length) return exact
+  }
+  const title = normalizeTitle(media.title)
+  const year = Number(media.year)
+  if (!title) return []
+  return entries.filter(entry => (
+    normalizeTitle(entry.media.title) === title
+    && (!Number.isInteger(year) || !entry.media.year || Number(entry.media.year) === year)
+    && (['imdb', 'tmdb', 'tvdb'] as const).every(namespace => {
+      const sourceId = String(media.ids[namespace] ?? '').trim().toLowerCase()
+      const targetId = String(entry.media.ids[namespace] ?? '').trim().toLowerCase()
+      return !sourceId || !targetId || sourceId === targetId
+    })
+  ))
+}
+
+function uniqueJellyfinCandidate(
+  media: MediaRef,
+  entries: readonly JellyfinCatalogEntry[]
+): JellyfinCatalogEntry | null {
+  const candidates = jellyfinCandidates(media, entries)
+  return candidates.length === 1 ? candidates[0] : null
+}
+
+function jellyfinEpisodeEntriesForShow(
+  media: MediaRef,
+  catalog: JellyfinCatalog
+): JellyfinCatalogEntry[] {
+  const show = uniqueJellyfinCandidate(media, catalog.shows)
+  if (!show) return []
+  const showAliases = new Set(mediaAliasKeys(show.media))
+  return catalog.episodes.filter(entry => (
+    mediaAliasKeys(entry.media).some(alias => showAliases.has(alias))
+  ))
+}
+
+async function jellyfinTargetEpisodes(
+  connection: BridgeConnection,
+  media: MediaRef
+): Promise<EpisodeRef[]> {
+  const catalog = await loadJellyfinCatalog(connection)
+  return jellyfinEpisodeEntriesForShow(media, catalog).map(entry => ({
+    season: Number(entry.media.season),
+    episode: Number(entry.media.episode),
+    absoluteEpisode: entry.media.absoluteEpisode,
+    title: entry.media.episodeTitle,
+    videoId: `jellyfin:${entry.itemId}`
+  }))
+}
+
+function resolveJellyfinEntry(
+  media: MediaRef,
+  catalog: JellyfinCatalog,
+  scope: 'history' | 'progress' | 'library'
+): { entry: JellyfinCatalogEntry | null; issue?: BridgeIssue } {
+  if (media.kind === 'movie') {
+    const candidates = jellyfinCandidates(media, catalog.movies)
+    if (candidates.length === 1) return { entry: candidates[0] }
+    return {
+      entry: null,
+      issue: {
+        scope,
+        status: candidates.length > 1 ? 'ambiguous' : 'unresolved',
+        media,
+        reason: candidates.length > 1
+          ? 'Multiple Jellyfin movies matched this title and ID set.'
+          : 'This movie is not present in the connected Jellyfin server library.'
+      }
+    }
+  }
+  if (scope === 'library' || !Number.isInteger(media.season) || !Number.isInteger(media.episode)) {
+    const candidates = jellyfinCandidates(media, catalog.shows)
+    if (candidates.length === 1) return { entry: candidates[0] }
+    return {
+      entry: null,
+      issue: {
+        scope,
+        status: candidates.length > 1 ? 'ambiguous' : 'unresolved',
+        media,
+        reason: candidates.length > 1
+          ? 'Multiple Jellyfin shows matched this title and ID set.'
+          : 'This show is not present in the connected Jellyfin server library.'
+      }
+    }
+  }
+
+  const episodes = jellyfinEpisodeEntriesForShow(media, catalog)
+  const requested: EpisodeRef = {
+    season: Number(media.season),
+    episode: Number(media.episode),
+    absoluteEpisode: media.absoluteEpisode,
+    title: media.episodeTitle,
+    videoId: media.videoId
+  }
+  const targets = episodes.map(entry => ({
+    season: Number(entry.media.season),
+    episode: Number(entry.media.episode),
+    absoluteEpisode: entry.media.absoluteEpisode,
+    title: entry.media.episodeTitle,
+    videoId: `jellyfin:${entry.itemId}`
+  }))
+  const mapping = remapEpisode(requested, [requested], targets)
+  if (mapping.status !== 'mapped') {
+    return {
+      entry: null,
+      issue: { scope, status: mapping.status, media, reason: mapping.reason }
+    }
+  }
+  const itemId = String(mapping.target.videoId || '').replace(/^jellyfin:/, '')
+  const entry = episodes.find(candidate => candidate.itemId === itemId) || null
+  return entry
+    ? { entry }
+    : {
+        entry: null,
+        issue: { scope, status: 'unresolved', media, reason: 'The mapped Jellyfin episode could not be resolved.' }
+      }
+}
+
+async function pullJellyfin(options: PullOptions): Promise<PullResult> {
+  const { connection, scopes, log } = options
+  if (connection.credentials.service !== 'jellyfin') throw new Error('Expected Jellyfin credentials.')
+  const catalog = await loadJellyfinCatalog(connection, log)
+  const bundle = createEmptyBundle()
+  const provenance = sourceOf(connection)
+
+  if (scopes.history) {
+    for (const entry of [...catalog.movies, ...catalog.episodes]) {
+      if (!entry.played && entry.playCount < 1) continue
+      bundle.history.push({
+        media: entry.media,
+        watchedAt: entry.lastPlayedAt || entry.updatedAt || entry.addedAt,
+        playCount: Math.max(1, entry.playCount),
+        source: provenance
+      })
+    }
+  }
+
+  if (scopes.progress) {
+    for (const entry of [...catalog.movies, ...catalog.episodes]) {
+      if (
+        !entry.playbackPositionTicks
+        || !entry.runTimeTicks
+        || entry.playbackPositionTicks >= entry.runTimeTicks
+      ) continue
+      const positionMs = entry.playbackPositionTicks / 10_000
+      const durationMs = entry.runTimeTicks / 10_000
+      bundle.progress.push({
+        media: entry.media,
+        positionMs,
+        durationMs,
+        percentage: Math.min(100, positionMs / durationMs * 100),
+        updatedAt: entry.updatedAt || entry.addedAt,
+        source: provenance
+      })
+    }
+  }
+
+  if (scopes.library) {
+    for (const entry of [...catalog.movies, ...catalog.shows]) {
+      bundle.library.push({
+        media: entry.media,
+        addedAt: entry.addedAt,
+        lists: [{
+          ...provenance,
+          kind: 'library',
+          listId: connection.credentials.serverId,
+          name: connection.credentials.serverName
+        }],
+        source: provenance
+      })
+    }
+  }
+
+  return { bundle: dedupeBundle(bundle), issues: [] }
+}
+
+async function pushJellyfin(options: PushOptions): Promise<PushResult> {
+  const { connection, bundle, scopes, log } = options
+  if (connection.credentials.service !== 'jellyfin') throw new Error('Expected Jellyfin credentials.')
+  const credentials = connection.credentials
+  const catalog = await loadJellyfinCatalog(connection, log)
+  const written: PushCounts = { history: 0, progress: 0, library: 0 }
+  const skipped: PushCounts = { history: 0, progress: 0, library: 0 }
+  const issues: BridgeIssue[] = []
+  const confirmedScopes: BridgeScope[] = []
+
+  if (scopes.history) {
+    for (const record of bundle.history) {
+      const resolved = resolveJellyfinEntry(record.media, catalog, 'history')
+      if (!resolved.entry) {
+        skipped.history++
+        if (resolved.issue) issues.push(resolved.issue)
+        continue
+      }
+      try {
+        await jellyfinRequestWithLegacy(
+          connection,
+          `/UserPlayedItems/${encodeURIComponent(resolved.entry.itemId)}`,
+          `/Users/${encodeURIComponent(credentials.userId)}/PlayedItems/${encodeURIComponent(resolved.entry.itemId)}`,
+          {
+            userId: credentials.userId,
+            datePlayed: new Date(record.watchedAt || Date.now()).toISOString()
+          },
+          { method: 'POST' }
+        )
+        written.history++
+      } catch (error: any) {
+        skipped.history++
+        issues.push({
+          scope: 'history',
+          status: 'warning',
+          media: record.media,
+          reason: `Jellyfin could not mark this item watched: ${errorDetail(error?.body, error?.message)}`
+        })
+      }
+    }
+    confirmedScopes.push('history')
+    logTo(log, `Marked ${written.history} Jellyfin items watched.`)
+  }
+
+  if (scopes.progress) {
+    for (const record of bundle.progress) {
+      const resolved = resolveJellyfinEntry(record.media, catalog, 'progress')
+      if (!resolved.entry) {
+        skipped.progress++
+        if (resolved.issue) issues.push(resolved.issue)
+        continue
+      }
+      const absolute = absoluteProgress(record)
+      const durationMs = absolute?.durationMs || resolved.entry.runTimeTicks / 10_000
+      const percentage = progressPercentage(record)
+      const positionMs = absolute?.positionMs || (durationMs && percentage
+        ? Math.round(durationMs * percentage / 100)
+        : 0)
+      if (!durationMs || !positionMs) {
+        skipped.progress++
+        issues.push({
+          scope: 'progress',
+          status: 'unresolved',
+          media: record.media,
+          reason: 'Jellyfin progress needs a valid position and duration.'
+        })
+        continue
+      }
+      const clampedPositionMs = Math.max(1, Math.min(positionMs, durationMs - 1))
+      const userData = resolved.entry.userData
+      const body = {
+        PlaybackPositionTicks: Math.round(clampedPositionMs * 10_000),
+        PlayedPercentage: Math.min(100, clampedPositionMs / durationMs * 100),
+        PlayCount: Math.max(0, Number(userData?.PlayCount ?? userData?.playCount) || 0),
+        IsFavorite: Boolean(userData?.IsFavorite ?? userData?.isFavorite),
+        Likes: userData?.Likes ?? userData?.likes,
+        LastPlayedDate: new Date(record.updatedAt || Date.now()).toISOString(),
+        Played: Boolean(userData?.Played ?? userData?.played),
+        Key: userData?.Key ?? userData?.key,
+        ItemId: resolved.entry.itemId
+      }
+      try {
+        await jellyfinRequestWithLegacy(
+          connection,
+          `/UserItems/${encodeURIComponent(resolved.entry.itemId)}/UserData`,
+          `/Users/${encodeURIComponent(credentials.userId)}/Items/${encodeURIComponent(resolved.entry.itemId)}/UserData`,
+          { userId: credentials.userId },
+          { method: 'POST', body: JSON.stringify(body) }
+        )
+        written.progress++
+      } catch (error: any) {
+        skipped.progress++
+        issues.push({
+          scope: 'progress',
+          status: 'warning',
+          media: record.media,
+          reason: `Jellyfin could not update this resume point: ${errorDetail(error?.body, error?.message)}`
+        })
+      }
+    }
+    confirmedScopes.push('progress')
+    logTo(log, `Updated ${written.progress} Jellyfin resume points.`)
+  }
+
+  if (scopes.library && bundle.library.length) {
+    skipped.library = bundle.library.length
+    issues.push({
+      scope: 'library',
+      status: 'note',
+      reason: 'Jellyfin server libraries are read-only in Sync Bridge because adding a title requires adding its media files to the server.'
+    })
+  }
+
+  jellyfinCatalogCache.delete(connection.credentials)
   return { written, skipped, issues, confirmedScopes }
 }
 
@@ -3117,6 +3746,7 @@ async function targetEpisodesFor(
   if (connection.service === 'nuvio') return nuvioTargetEpisodes(connection, media)
   if (connection.service === 'trakt') return traktTargetEpisodes(connection, media)
   if (connection.service === 'plex') return plexTargetEpisodes(connection, media)
+  if (connection.service === 'jellyfin') return jellyfinTargetEpisodes(connection, media)
   return []
 }
 
@@ -3132,7 +3762,7 @@ export async function inspectDestinationMappings(
   log?: BridgeLog,
   sourceConnection?: BridgeConnection
 ): Promise<DestinationMappingIssue[]> {
-  if (!['stremio', 'nuvio', 'trakt', 'plex'].includes(connection.service)) return []
+  if (!['stremio', 'nuvio', 'trakt', 'plex', 'jellyfin'].includes(connection.service)) return []
   const records: Array<{
     scope: 'history' | 'progress'
     media: MediaRef
@@ -3172,7 +3802,9 @@ export async function inspectDestinationMappings(
           ? 'Nuvio has no episode metadata for this series; its episode state cannot be mapped safely.'
           : connection.service === 'plex'
             ? 'Plex does not contain a matching episode on the selected server.'
-            : 'Trakt has no episode metadata for this series; its episode state cannot be mapped safely.'
+            : connection.service === 'jellyfin'
+              ? 'Jellyfin does not contain a matching episode on the connected server.'
+              : 'Trakt has no episode metadata for this series; its episode state cannot be mapped safely.'
       return {
         scope: record.scope,
         sourceMedia: record.media,
@@ -3276,6 +3908,7 @@ export async function pullMediaBridge(options: PullOptions): Promise<PullResult>
     case 'simkl': return pullSimkl(options)
     case 'stremio': return pullStremio(options)
     case 'plex': return pullPlex(options)
+    case 'jellyfin': return pullJellyfin(options)
   }
 }
 
@@ -3286,6 +3919,7 @@ export async function pushMediaBridge(options: PushOptions): Promise<PushResult>
     case 'simkl': return pushSimkl(options)
     case 'stremio': return pushStremio(options)
     case 'plex': return pushPlex(options)
+    case 'jellyfin': return pushJellyfin(options)
   }
 }
 
@@ -3343,6 +3977,28 @@ export function createPlexConnection(
       accountToken: login.accountToken,
       clientIdentifier: login.clientIdentifier,
       server
+    }
+  }
+}
+
+export function createJellyfinConnection(
+  slot: BridgeSlot,
+  login: Awaited<ReturnType<typeof signInJellyfin>>
+): BridgeConnection {
+  return {
+    slot,
+    service: 'jellyfin',
+    accountId: login.userId,
+    serverId: login.serverId,
+    displayName: `${login.displayName} · ${login.serverName}`,
+    credentials: {
+      service: 'jellyfin',
+      baseUrl: login.baseUrl,
+      accessToken: login.accessToken,
+      userId: login.userId,
+      serverId: login.serverId,
+      serverName: login.serverName,
+      deviceId: login.deviceId
     }
   }
 }

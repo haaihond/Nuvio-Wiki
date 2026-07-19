@@ -77,9 +77,11 @@ After authenticating, customize your tracking features.
 
 #### Sync Bridge
 
-Use the web-based Sync Bridge to preview and transfer supported tracking data between **Simkl**, **Stremio**, **Trakt**, **Plex**, and **Nuvio**. Every source and destination pairing is available, including transfers between different accounts on the same service, different profiles within Nuvio, or different Plex servers on one account.
+Use the web-based Sync Bridge to preview and transfer supported tracking data between **Simkl**, **Stremio**, **Trakt**, **Plex**, **Jellyfin**, and **Nuvio**. Every source and destination pairing is available, including transfers between different accounts on the same service, different profiles within Nuvio, or different media servers.
 
 Plex connects through Plex's approval screen and lets you choose any reachable server on the account. The bridge can read watched items, resume points, and movie/show library membership from that server. As a destination, Plex accepts watched state and resume points only for media already present on the selected server; Sync Bridge cannot add media files or saved titles to a Plex server library.
+
+Jellyfin connects directly to the HTTPS server URL you provide with your Jellyfin username and password. The bridge reads watched items, resume points, and movie/show library membership for that user. As a destination, Jellyfin accepts watched state and resume points only for media already present on the connected server; Sync Bridge cannot upload media files or add unavailable titles to a Jellyfin library. The server must be reachable from your browser and allow the wiki page to call its API.
 
 <NuvioTraktBridge />
 

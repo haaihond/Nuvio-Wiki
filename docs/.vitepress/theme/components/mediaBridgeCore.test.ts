@@ -37,11 +37,11 @@ function movie(ids: MediaRef['ids'], title = 'Movie'): MediaRef {
   return { kind: 'movie', ids, title, year: 2024 }
 }
 
-test('defines five services and generates every directional pair', () => {
-  assert.deepEqual(SERVICE_IDS, ['simkl', 'stremio', 'trakt', 'plex', 'nuvio'])
-  assert.equal(generateRoutePairs().length, 25)
-  assert.equal(ROUTE_PAIRS.length, 25)
-  assert.equal(new Set(ROUTE_PAIRS.map(route => route.id)).size, 25)
+test('defines six services and generates every directional pair', () => {
+  assert.deepEqual(SERVICE_IDS, ['simkl', 'stremio', 'trakt', 'plex', 'jellyfin', 'nuvio'])
+  assert.equal(generateRoutePairs().length, 36)
+  assert.equal(ROUTE_PAIRS.length, 36)
+  assert.equal(new Set(ROUTE_PAIRS.map(route => route.id)).size, 36)
 
   for (const service of SERVICE_IDS) {
     assert.equal(SERVICE_DEFINITIONS[service].id, service)
@@ -50,12 +50,12 @@ test('defines five services and generates every directional pair', () => {
       progress: true,
       library: true
     })
-    assert.deepEqual(SERVICE_DEFINITIONS[service].capabilities.write, service === 'plex'
+    assert.deepEqual(SERVICE_DEFINITIONS[service].capabilities.write, ['plex', 'jellyfin'].includes(service)
       ? { history: true, progress: true, library: false }
       : { history: true, progress: true, library: true })
   }
 
-  assert.equal(ROUTE_PAIRS.filter(route => route.sameService).length, 5)
+  assert.equal(ROUTE_PAIRS.filter(route => route.sameService).length, 6)
   assert.equal(summarizeRoute('simkl', 'nuvio').label, 'Simkl → Nuvio')
   assert.equal(summarizeRoute('simkl', 'nuvio').enabledScopeCount, 3)
   assert.deepEqual(summarizeRoute('trakt', 'plex').scopes.map(scope => [scope.scope, scope.supported]), [
@@ -115,6 +115,20 @@ test('allows one Plex account to bridge between distinct servers', () => {
   const sameServer = validateEndpointPair(
     { ...endpoint('source', 'plex', 'user-1'), serverId: 'server-a' },
     { ...endpoint('destination', 'plex', 'USER-1'), serverId: 'SERVER-A' }
+  )
+  assert.equal(sameServer.valid, false)
+  assert.equal(sameServer.code, 'same_endpoint')
+})
+
+test('allows one Jellyfin user identity to bridge between distinct servers', () => {
+  assert.equal(validateEndpointPair(
+    { ...endpoint('source', 'jellyfin', 'user-1'), serverId: 'server-a' },
+    { ...endpoint('destination', 'jellyfin', 'user-1'), serverId: 'server-b' }
+  ).valid, true)
+
+  const sameServer = validateEndpointPair(
+    { ...endpoint('source', 'jellyfin', 'user-1'), serverId: 'server-a' },
+    { ...endpoint('destination', 'jellyfin', 'USER-1'), serverId: 'SERVER-A' }
   )
   assert.equal(sameServer.valid, false)
   assert.equal(sameServer.code, 'same_endpoint')
@@ -186,6 +200,7 @@ test('exposes namespace-safe media and episode aliases for secondary-ID matching
   )
   const malAliases = new Set(mediaAliasKeys(movie({ external: { mal: 42 } })))
   assert.ok(mediaAliasKeys(movie({ external: { kitsu: 42 } })).every(alias => !malAliases.has(alias)))
+  assert.deepEqual(mediaAliasKeys(movie({ jellyfin: 'item:abc' })), ['movie:jellyfin:item:abc'])
 })
 
 test('preserves external anime IDs without sharing nested references', () => {

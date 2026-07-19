@@ -26,6 +26,7 @@ import {
 } from './mediaBridgePlan'
 import {
   createMediaBridgeVerificationCheckpoint,
+  createJellyfinConnection,
   createNuvioConnection,
   createPlexConnection,
   createPlexPinLink,
@@ -40,6 +41,7 @@ import {
   readPlexPinLink,
   readStremioDeviceLink,
   signInNuvio,
+  signInJellyfin,
   signInPlex,
   signInStremio,
   selectPlexServer,
@@ -66,7 +68,7 @@ const { lang } = useData()
 const isDutch = computed(() => String(lang.value || '').startsWith('nl'))
 const copy = computed(() => isDutch.value ? {
   title: 'Sync Bridge',
-  subtitle: 'Verplaats kijkgeschiedenis, voortgang en opgeslagen titels tussen Simkl, Stremio, Trakt, Plex en Nuvio.',
+  subtitle: 'Verplaats kijkgeschiedenis, voortgang en opgeslagen titels tussen Simkl, Stremio, Trakt, Plex, Jellyfin en Nuvio.',
   info: 'Koppel een bron en bestemming en start direct met synchroniseren. Een voorbeeld bekijken is optioneel. Bestaande bestemmingsgegevens blijven behouden.',
   source: 'Bron',
   destination: 'Bestemming',
@@ -79,8 +81,11 @@ const copy = computed(() => isDutch.value ? {
   password: 'Wachtwoord',
   profile: 'Nuvio-profiel',
   plexServer: 'Plex-server',
+  jellyfinServerUrl: 'Jellyfin-server-URL',
+  jellyfinUsername: 'Gebruikersnaam',
+  jellyfinConnect: 'Gebruik de HTTPS-URL waarmee deze browser je Jellyfin-server kan bereiken. Je inloggegevens gaan rechtstreeks naar die server.',
   swap: 'Bron en bestemming omwisselen',
-  sameService: 'Gebruik twee verschillende accounts, Nuvio-profielen of Plex-servers. Opent de koppeling opnieuw het eerste account, log dan bij die dienst uit en verbind de bestemming opnieuw.',
+  sameService: 'Gebruik twee verschillende accounts, Nuvio-profielen, Plex-servers of Jellyfin-servers. Opent de koppeling opnieuw het eerste account, log dan bij die dienst uit en verbind de bestemming opnieuw.',
   scopes: 'Wat wil je verplaatsen?',
   history: 'Kijkgeschiedenis',
   historyHelp: 'Bekeken films en afleveringen',
@@ -113,7 +118,7 @@ const copy = computed(() => isDutch.value ? {
   finishedWarnings: 'Synchronisatie voltooid met meldingen.',
   secureShort: 'Synchronisatie draait lokaal in je browser',
   secure: 'Alle vergelijkings- en synchronisatielogica draait lokaal in dit browsertabblad. De Sync Bridge slaat je wachtwoorden, verbindingstokens en gesynchroniseerde gegevens nooit op; wachtwoorden gaan rechtstreeks naar de dienst waarbij je inlogt.',
-  caveat: 'De nieuwste bekeken status wordt verplaatst; afzonderlijke herhaalde afspeelbeurten worden samengevoegd. Trakt-collecties worden opgeslagen titels; benoemde lijsten en beoordelingen blijven bij hun eigen dienst. Plex kan alleen status schrijven voor titels die al op de gekozen server staan.',
+  caveat: 'De nieuwste bekeken status wordt verplaatst; afzonderlijke herhaalde afspeelbeurten worden samengevoegd. Trakt-collecties worden opgeslagen titels; benoemde lijsten en beoordelingen blijven bij hun eigen dienst. Plex en Jellyfin kunnen alleen status schrijven voor titels die al op de verbonden server staan.',
   setupStopped: 'Instellen gestopt',
   noChanges: 'Er zijn geen nieuwe of nieuwere items om te synchroniseren.',
   authorizeSeparate: 'Autoriseer voor deze kant een afzonderlijke sessie:',
@@ -144,7 +149,7 @@ const copy = computed(() => isDutch.value ? {
   supportButton: 'Support me on Ko-fi'
 } : {
   title: 'Sync Bridge',
-  subtitle: 'Move watch history, playback progress, and saved titles between Simkl, Stremio, Trakt, Plex, and Nuvio.',
+  subtitle: 'Move watch history, playback progress, and saved titles between Simkl, Stremio, Trakt, Plex, Jellyfin, and Nuvio.',
   info: 'Connect a source and destination and start syncing directly. Previewing changes is optional. Existing destination data is preserved.',
   source: 'Source',
   destination: 'Destination',
@@ -157,8 +162,11 @@ const copy = computed(() => isDutch.value ? {
   password: 'Password',
   profile: 'Nuvio profile',
   plexServer: 'Plex server',
+  jellyfinServerUrl: 'Jellyfin server URL',
+  jellyfinUsername: 'Username',
+  jellyfinConnect: 'Use the HTTPS URL this browser can reach for your Jellyfin server. Your credentials go directly to that server.',
   swap: 'Swap source and destination',
-  sameService: 'Use two different accounts, Nuvio profiles, or Plex servers. If sign-in reopens the first account, sign out at that service and reconnect the destination.',
+  sameService: 'Use two different accounts, Nuvio profiles, Plex servers, or Jellyfin servers. If sign-in reopens the first account, sign out at that service and reconnect the destination.',
   scopes: 'What should move?',
   history: 'Watch history',
   historyHelp: 'Watched movies and episodes',
@@ -191,7 +199,7 @@ const copy = computed(() => isDutch.value ? {
   finishedWarnings: 'Sync complete with notes.',
   secureShort: 'Sync runs locally in your browser',
   secure: 'All comparison and sync logic runs locally in this browser tab. The Sync Bridge never stores your passwords, connection tokens, or synced data; passwords go directly to the service you sign in to.',
-  caveat: 'The latest watched state is transferred; individual replay events are collapsed. Trakt collections become saved titles; named lists and ratings stay provider-native. Plex can only write state for titles already present on the selected server.',
+  caveat: 'The latest watched state is transferred; individual replay events are collapsed. Trakt collections become saved titles; named lists and ratings stay provider-native. Plex and Jellyfin can only write state for titles already present on the connected server.',
   setupStopped: 'Setup stopped',
   noChanges: 'There are no new or newer items to sync.',
   authorizeSeparate: 'Authorize a separate session for this side:',
@@ -228,6 +236,7 @@ const SERVICE_LOGOS: Record<ServiceId, string> = {
   stremio: '/service-logos/stremio.png',
   trakt: '/service-logos/trakt.svg',
   plex: '/service-logos/plex.svg',
+  jellyfin: '/service-logos/jellyfin.svg',
   nuvio: '/official_logo_original.png'
 }
 const isCollapsed = ref(!props.defaultExpanded)
@@ -239,9 +248,14 @@ const connections = reactive<Record<BridgeSlot, BridgeConnection | null>>({
   source: null,
   destination: null
 })
-const forms = reactive<Record<BridgeSlot, { email: string; password: string }>>({
-  source: { email: '', password: '' },
-  destination: { email: '', password: '' }
+const forms = reactive<Record<BridgeSlot, {
+  email: string
+  password: string
+  serverUrl: string
+  username: string
+}>>({
+  source: { email: '', password: '', serverUrl: '', username: '' },
+  destination: { email: '', password: '', serverUrl: '', username: '' }
 })
 const connectionBusy = reactive<Record<BridgeSlot, boolean>>({ source: false, destination: false })
 const connectionAttempt = reactive<Record<BridgeSlot, number>>({ source: 0, destination: 0 })
@@ -702,6 +716,36 @@ async function connectPasswordService(slot: BridgeSlot) {
   }
 }
 
+async function connectJellyfin(slot: BridgeSlot) {
+  if (selectedService[slot] !== 'jellyfin') return
+  const serverUrl = forms[slot].serverUrl.trim()
+  const username = forms[slot].username.trim()
+  const password = forms[slot].password
+  if (!serverUrl || !username || !password) {
+    globalError.value = 'Enter the Jellyfin server URL, username, and password.'
+    return
+  }
+  const attempt = ++connectionAttempt[slot]
+  connectionBusy[slot] = true
+  globalError.value = ''
+  appendLog(`Signing in to Jellyfin for the ${slotLabel(slot).toLowerCase()}...`)
+  try {
+    const login = await signInJellyfin(serverUrl, username, password)
+    if (attempt !== connectionAttempt[slot] || selectedService[slot] !== 'jellyfin') return
+    connections[slot] = createJellyfinConnection(slot, login)
+    clearPreview()
+    appendLog(`Jellyfin connected as ${connections[slot]!.displayName || connections[slot]!.accountId}.`)
+    statusMessage.value = `${slotLabel(slot)} connected.`
+  } catch (error: any) {
+    if (attempt !== connectionAttempt[slot]) return
+    globalError.value = error.message
+    appendLog(`Jellyfin sign-in failed: ${error.message}`)
+  } finally {
+    forms[slot].password = ''
+    if (attempt === connectionAttempt[slot]) connectionBusy[slot] = false
+  }
+}
+
 function updateNuvioProfile(slot: BridgeSlot, event: Event) {
   const connection = connections[slot]
   if (!connection || connection.service !== 'nuvio') return
@@ -1133,6 +1177,49 @@ onBeforeUnmount(() => {
                 {{ connectionBusy[slot] ? copy.connecting : `${copy.connect} ${SERVICE_DEFINITIONS[selectedService[slot]].label}` }}
               </button>
             </form>
+
+            <div v-if="!connections[slot] && selectedService[slot] === 'jellyfin'" class="connect-area">
+              <p>{{ copy.jellyfinConnect }}</p>
+              <form class="credential-form" @submit.prevent="connectJellyfin(slot)">
+                <label class="field-block server-url-field">
+                  <span>{{ copy.jellyfinServerUrl }}</span>
+                  <input
+                    v-model="forms[slot].serverUrl"
+                    type="url"
+                    inputmode="url"
+                    autocomplete="url"
+                    :aria-label="`${slotLabel(slot)} ${copy.jellyfinServerUrl}`"
+                    placeholder="https://jellyfin.example.com"
+                  />
+                </label>
+                <label class="field-block">
+                  <span>{{ copy.jellyfinUsername }}</span>
+                  <input
+                    v-model="forms[slot].username"
+                    type="text"
+                    autocomplete="username"
+                    :aria-label="`${slotLabel(slot)} Jellyfin ${copy.jellyfinUsername}`"
+                  />
+                </label>
+                <label class="field-block">
+                  <span>{{ copy.password }}</span>
+                  <input
+                    v-model="forms[slot].password"
+                    type="password"
+                    autocomplete="current-password"
+                    :aria-label="`${slotLabel(slot)} Jellyfin ${copy.password}`"
+                  />
+                </label>
+                <button
+                  type="submit"
+                  class="primary-button connect-button"
+                  :aria-label="`${copy.connect} Jellyfin ${slotLabel(slot)}`"
+                  :disabled="connectionBusy[slot]"
+                >
+                  {{ connectionBusy[slot] ? copy.connecting : `${copy.connect} Jellyfin` }}
+                </button>
+              </form>
+            </div>
 
             <div v-if="!connections[slot] && selectedService[slot] === 'stremio'" class="connect-area">
               <p>{{ copy.stremioDevice }}</p>
@@ -1586,6 +1673,7 @@ onBeforeUnmount(() => {
 .password-fallback .credential-form { margin-top: 9px; }
 .credential-form { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .credential-form .connect-button { grid-column: 1 / -1; }
+.credential-form .server-url-field { grid-column: 1 / -1; }
 .field-block { display: flex; flex-direction: column; gap: 7px; margin-top: 12px; color: var(--vp-c-text-2); font-size: 12px; font-weight: 500; }
 .field-block input, .field-block select {
   width: 100%;

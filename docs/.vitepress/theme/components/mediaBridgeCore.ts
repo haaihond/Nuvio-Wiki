@@ -1,4 +1,4 @@
-export const SERVICE_IDS = ['simkl', 'stremio', 'trakt', 'plex', 'nuvio'] as const
+export const SERVICE_IDS = ['simkl', 'stremio', 'trakt', 'plex', 'jellyfin', 'nuvio'] as const
 
 export type ServiceId = (typeof SERVICE_IDS)[number]
 export type BridgeSlot = 'source' | 'destination'
@@ -98,6 +98,22 @@ export const SERVICE_DEFINITIONS: Record<ServiceId, ServiceDefinition> = {
       nativeLists: ['library']
     }
   },
+  jellyfin: {
+    id: 'jellyfin',
+    label: 'Jellyfin',
+    accountLabel: 'Jellyfin server',
+    scopeLabels: {
+      history: 'Watched items',
+      progress: 'Continue watching',
+      library: 'Server library'
+    },
+    capabilities: {
+      read: { ...FULL_SCOPES },
+      write: { history: true, progress: true, library: false },
+      profiles: false,
+      nativeLists: ['library']
+    }
+  },
   nuvio: {
     id: 'nuvio',
     label: 'Nuvio',
@@ -123,6 +139,7 @@ export interface MediaIds {
   trakt?: string | number
   simkl?: string | number
   plex?: string
+  jellyfin?: string
   stremio?: string
   slug?: string
   external?: Record<string, string | number>
@@ -238,7 +255,7 @@ export function endpointFingerprint(endpoint: ConnectedEndpoint | null | undefin
   const parts = [endpoint.service, accountId]
   if (endpoint.service === 'nuvio') {
     parts.push(normalizeProfileId(endpoint.profileId) || '*')
-  } else if (endpoint.service === 'plex') {
+  } else if (endpoint.service === 'plex' || endpoint.service === 'jellyfin') {
     parts.push(normalizeIdentity(endpoint.serverId) || '*')
   }
   return parts.map(part => encodeURIComponent(part)).join(':')
@@ -286,18 +303,18 @@ export function validateEndpointPair(
     if (sourceProfile !== destinationProfile) {
       return result(true, 'ok', 'The source and destination use different Nuvio profiles.')
     }
-  } else if (source.service === 'plex') {
+  } else if (source.service === 'plex' || source.service === 'jellyfin') {
     const sourceServer = normalizeIdentity(source.serverId)
     const destinationServer = normalizeIdentity(destination.serverId)
     if (sourceServer && destinationServer && sourceServer !== destinationServer) {
-      return result(true, 'ok', 'The source and destination use different Plex servers.')
+      return result(true, 'ok', 'The source and destination use different media servers.')
     }
   }
 
   return result(
     false,
     'same_endpoint',
-    'Source and destination must be different accounts, Nuvio profiles, or Plex servers.'
+    'Source and destination must be different accounts, Nuvio profiles, or media servers.'
   )
 }
 
@@ -422,6 +439,9 @@ function collectCanonicalIds(ids: MediaIds): Array<[namespace: string, value: st
 
   const plex = String(ids.plex ?? '').trim().toLocaleLowerCase('en-US')
   if (plex) add('plex', plex)
+
+  const jellyfin = String(ids.jellyfin ?? '').trim().toLocaleLowerCase('en-US')
+  if (jellyfin) add('jellyfin', jellyfin)
 
   for (const namespace of ['tmdb', 'tvdb', 'trakt', 'simkl'] as const) {
     const value = normalizeNumericId(ids[namespace])
