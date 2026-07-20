@@ -2,27 +2,9 @@
 
 A modern, searchable documentation site for Nuvio. The site is community-maintained and is not affiliated with the official Nuvio development team and live on: https://nuvio.wiki/
 
-## Local development
+## Run locally
 
-On Windows, double-click `Start Nuvio Wiki.cmd` to start the server and open the site in your browser.
-
-Or run it manually:
-
-```bash
-npm install
-npm run docs:dev
-```
-
-VitePress serves the site locally and updates as Markdown files change.
-
-## Production build
-
-```bash
-npm run docs:build
-npm run docs:preview
-```
-
-The static output is written to `docs/.vitepress/dist`.
+[Local setup guide](RUNNING_LOCALLY.md) — install and run the wiki on your computer.
 
 ## Documentation
 
