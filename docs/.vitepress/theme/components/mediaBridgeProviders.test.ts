@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createEmptyBundle } from './mediaBridgeCore.ts'
 import {
+  identifyOAuthConnection,
   inspectDestinationMappings,
   pullMediaBridge,
   pullMediaBridgeForVerification,
@@ -35,6 +36,7 @@ function simklConnection(): BridgeConnection {
     service: 'simkl',
     accountId: 'test-account',
     displayName: 'Test Simkl account',
+    simklAccountType: 'vip',
     credentials: {
       service: 'simkl',
       clientId: 'test-client',
@@ -42,6 +44,82 @@ function simklConnection(): BridgeConnection {
     }
   }
 }
+
+test('accepts Simkl Pro and VIP destinations using the documented settings request', async t => {
+  const fetchMock = t.mock.method(globalThis, 'fetch', async (_input, init) => {
+    assert.equal(init?.method, 'POST')
+    assert.equal(init?.body, undefined)
+    const authorization = new Headers(init?.headers).get('authorization') || ''
+    const accountType = authorization.includes('pro-token') ? 'pro' : 'vip'
+    return Response.json({
+      user: { name: `${accountType}-user` },
+      account: { id: accountType === 'pro' ? 101 : 202, type: accountType }
+    })
+  })
+
+  for (const accountType of ['pro', 'vip'] as const) {
+    const connection = await identifyOAuthConnection('destination', {
+      service: 'simkl',
+      clientId: 'test-client',
+      accessToken: `${accountType}-token`
+    })
+    assert.equal(connection.service, 'simkl')
+    assert.equal(connection.simklAccountType, accountType)
+    assert.equal(connection.displayName, `${accountType}-user`)
+  }
+  assert.equal(fetchMock.mock.callCount(), 2)
+})
+
+test('rejects Simkl Free accounts as import destinations', async t => {
+  const fetchMock = t.mock.method(globalThis, 'fetch', async () => Response.json({
+    user: { name: 'free-user' },
+    account: { id: 303, type: 'free' }
+  }))
+
+  await assert.rejects(
+    identifyOAuthConnection('destination', {
+      service: 'simkl',
+      clientId: 'test-client',
+      accessToken: 'test-token'
+    }),
+    /not available for Free accounts.*Pro or VIP/
+  )
+  assert.equal(fetchMock.mock.callCount(), 1)
+})
+
+test('rejects Simkl as a source before reading account settings', async t => {
+  const fetchMock = t.mock.method(globalThis, 'fetch', async () => {
+    throw new Error('should not fetch')
+  })
+
+  await assert.rejects(
+    identifyOAuthConnection('source', {
+      service: 'simkl',
+      clientId: 'test-client',
+      accessToken: 'test-token'
+    }),
+    /only be used as an import destination/
+  )
+  assert.equal(fetchMock.mock.callCount(), 0)
+})
+
+test('blocks Simkl writes when a paid plan was not verified', async t => {
+  const fetchMock = t.mock.method(globalThis, 'fetch', async () => Response.json({}))
+  const connection = simklConnection()
+  connection.simklAccountType = 'free'
+  const bundle = createEmptyBundle()
+  bundle.history.push(movieHistory('Blocked import', 'tt2015381', Date.UTC(2026, 6, 17)))
+
+  await assert.rejects(
+    pushMediaBridge({
+      connection,
+      bundle,
+      scopes: { history: true, progress: false, library: false }
+    }),
+    /only available for Simkl Pro or VIP accounts/
+  )
+  assert.equal(fetchMock.mock.callCount(), 0)
+})
 
 function stremioConnection(): BridgeConnection {
   return {

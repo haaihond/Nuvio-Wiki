@@ -102,6 +102,8 @@ export interface SimklCredentials {
   accessToken: string
 }
 
+export type SimklAccountType = 'free' | 'pro' | 'vip'
+
 export interface StremioCredentials {
   service: 'stremio'
   authKey: string
@@ -157,6 +159,7 @@ export type BridgeCredentials =
 
 export interface BridgeConnection extends ConnectedEndpoint {
   credentials: BridgeCredentials
+  simklAccountType?: SimklAccountType
   profiles?: NuvioProfile[]
   servers?: PlexServer[]
 }
@@ -1241,9 +1244,19 @@ export async function identifyOAuthConnection(
       displayName: String(user?.name || user?.username || user?.ids?.slug || accountId)
     }
   }
-  const { data } = await simklRequest(temporary, '/users/settings')
+  if (slot !== 'destination') {
+    throw new Error('Simkl can only be used as an import destination in the Sync Bridge.')
+  }
+  const { data } = await simklRequest(temporary, '/users/settings', {}, { method: 'POST' })
   const user = data?.user || data
   const account = data?.account || {}
+  const accountType = String(account?.type || '').trim().toLowerCase()
+  if (accountType === 'free') {
+    throw new Error('Importing to Simkl is not available for Free accounts. A Simkl Pro or VIP account is required.')
+  }
+  if (accountType !== 'pro' && accountType !== 'vip') {
+    throw new Error('Could not verify a Simkl Pro or VIP account, so importing to Simkl is not available.')
+  }
   const accountId = String(
     account?.id
     || account?.ids?.simkl
@@ -1258,6 +1271,7 @@ export async function identifyOAuthConnection(
   return {
     ...temporary,
     accountId,
+    simklAccountType: accountType,
     displayName: String(user?.name || user?.username || user?.email || accountId)
   }
 }
@@ -3164,6 +3178,12 @@ function hasSimklWriteEnvelope(data: any): boolean {
 
 async function pushSimkl(options: PushOptions): Promise<PushResult> {
   const { connection, bundle, scopes, log } = options
+  if (connection.slot !== 'destination') {
+    throw new Error('Simkl can only be used as an import destination in the Sync Bridge.')
+  }
+  if (connection.simklAccountType !== 'pro' && connection.simklAccountType !== 'vip') {
+    throw new Error('Importing to Simkl is only available for Simkl Pro or VIP accounts.')
+  }
   const written: PushCounts = { history: 0, progress: 0, library: 0 }
   const skipped: Partial<PushCounts> = {}
   const issues: BridgeIssue[] = []

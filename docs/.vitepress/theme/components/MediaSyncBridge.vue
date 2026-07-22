@@ -10,9 +10,9 @@ import {
 import { useData, withBase } from 'vitepress'
 import {
   SERVICE_DEFINITIONS,
-  SERVICE_IDS,
   endpointFingerprint,
   routeLabel,
+  serviceIdsForSlot,
   summarizeScopes,
   validateEndpointPair,
   type BridgeSlot,
@@ -68,8 +68,10 @@ const { lang } = useData()
 const isDutch = computed(() => String(lang.value || '').startsWith('nl'))
 const copy = computed(() => isDutch.value ? {
   title: 'Sync Bridge',
-  subtitle: 'Verplaats kijkgeschiedenis, voortgang en opgeslagen titels tussen Simkl, Stremio, Trakt, Plex, Jellyfin en Nuvio.',
+  subtitle: 'Importeer kijkgeschiedenis, voortgang en opgeslagen titels naar Simkl, of verplaats ze tussen Stremio, Trakt, Plex, Jellyfin en Nuvio.',
   info: 'Koppel een bron en bestemming en start direct met synchroniseren. Een voorbeeld bekijken is optioneel. Bestaande bestemmingsgegevens blijven behouden.',
+  simklImportAccess: 'Simkl kan alleen als bestemming worden gebruikt. Importeren naar Simkl vereist een Simkl Pro- of VIP-account.',
+  simklUpgrade: 'Koop Simkl Pro of VIP',
   source: 'Bron',
   destination: 'Bestemming',
   chooseService: 'Kies dienst',
@@ -149,8 +151,10 @@ const copy = computed(() => isDutch.value ? {
   supportButton: 'Support me on Ko-fi'
 } : {
   title: 'Sync Bridge',
-  subtitle: 'Move watch history, playback progress, and saved titles between Simkl, Stremio, Trakt, Plex, Jellyfin, and Nuvio.',
+  subtitle: 'Import watch history, playback progress, and saved titles into Simkl, or move them between Stremio, Trakt, Plex, Jellyfin, and Nuvio.',
   info: 'Connect a source and destination and start syncing directly. Previewing changes is optional. Existing destination data is preserved.',
+  simklImportAccess: 'Simkl is destination-only. Importing to Simkl requires a Simkl Pro or VIP account.',
+  simklUpgrade: 'Get Simkl Pro or VIP',
   source: 'Source',
   destination: 'Destination',
   chooseService: 'Choose service',
@@ -375,6 +379,10 @@ function slotLabel(slot: BridgeSlot) {
 
 function serviceLogo(service: ServiceId) {
   return withBase(SERVICE_LOGOS[service])
+}
+
+function servicesForSlot(slot: BridgeSlot) {
+  return serviceIdsForSlot(slot)
 }
 
 function handleServiceChange(slot: BridgeSlot, event: Event) {
@@ -1063,7 +1071,7 @@ onBeforeUnmount(() => {
                   :disabled="routeLocked"
                   @change="handleServiceChange(slot, $event)"
                 >
-                  <option v-for="service in SERVICE_IDS" :key="service" :value="service">
+                  <option v-for="service in servicesForSlot(slot)" :key="service" :value="service">
                     {{ SERVICE_DEFINITIONS[service].label }}
                   </option>
                 </select>
@@ -1072,6 +1080,18 @@ onBeforeUnmount(() => {
                 </svg>
               </span>
             </label>
+
+            <div v-if="slot === 'destination' && selectedService[slot] === 'simkl'" class="provider-access-note">
+              <p>{{ copy.simklImportAccess }}</p>
+              <a
+                class="primary-button simkl-upgrade-button"
+                href="https://simkl.com/vip/?invite-from=8786941"
+                target="_blank"
+                rel="noopener noreferrer sponsored"
+              >
+                {{ copy.simklUpgrade }}
+              </a>
+            </div>
 
             <div v-if="connections[slot]" class="connection-summary">
               <img
@@ -1664,6 +1684,31 @@ onBeforeUnmount(() => {
 }
 .service-select-shell select:disabled { cursor: not-allowed; }
 .service-select-shell svg { width: 18px; fill: none; stroke: currentColor; stroke-width: 2; pointer-events: none; }
+.provider-access-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: -8px 0 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--vp-c-brand-soft);
+  border-radius: 8px;
+  background: var(--vp-c-brand-soft);
+  color: var(--vp-c-text-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.provider-access-note p { margin: 0; }
+.simkl-upgrade-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  min-height: 36px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.simkl-upgrade-button:hover { color: var(--vp-c-white); text-decoration: none; }
 
 .connect-area { display: flex; flex-direction: column; gap: 14px; }
 .connect-area p { margin: 0; color: var(--vp-c-text-2); font-size: 13px; line-height: 1.55; }
@@ -2089,6 +2134,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
   }
   .bridge-intro { flex-direction: column; }
   .secure-note { display: none; }
+  .provider-access-note { align-items: stretch; flex-direction: column; }
+  .simkl-upgrade-button { width: 100%; }
   .credential-form { grid-template-columns: 1fr; }
   .bridge-actions { align-items: stretch; flex-direction: column; }
   .bridge-actions button { width: 100%; }

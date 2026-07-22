@@ -44,7 +44,7 @@ export const SERVICE_DEFINITIONS: Record<ServiceId, ServiceDefinition> = {
       library: 'Watchlist'
     },
     capabilities: {
-      read: { ...FULL_SCOPES },
+      read: { history: false, progress: false, library: false },
       write: { ...FULL_SCOPES },
       profiles: false,
       nativeLists: ['watchlist']
@@ -130,6 +130,13 @@ export const SERVICE_DEFINITIONS: Record<ServiceId, ServiceDefinition> = {
       nativeLists: ['library']
     }
   }
+}
+
+export function serviceIdsForSlot(slot: BridgeSlot): ServiceId[] {
+  const capability = slot === 'source' ? 'read' : 'write'
+  return SERVICE_IDS.filter(service => (
+    Object.values(SERVICE_DEFINITIONS[service].capabilities[capability]).some(Boolean)
+  ))
 }
 
 export interface MediaIds {
