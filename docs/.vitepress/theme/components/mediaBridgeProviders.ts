@@ -35,7 +35,10 @@ const JELLYFIN_VERSION = '1.0.0'
 const CINEMETA_API = 'https://v3-cinemeta.strem.io'
 const NUVIO_API = 'https://api.nuvio.tv'
 const TRAKT_MAX_RESUME_PROGRESS = 79
+const TRAKT_PAGE_SIZE = 100
 const SIMKL_PROGRESS_IMPORT_TIMEOUT_MS = 30_000
+const NUVIO_METADATA_BATCH_SIZE = 400
+const NUVIO_METADATA_BATCH_CONCURRENCY = 4
 
 const SIMKL_EXTERNAL_ID_NAMESPACES = [
   'mal',
@@ -438,15 +441,28 @@ export function parseNuvioContentId(contentId: unknown): MediaIds {
   return { stremio: value }
 }
 
-function nuvioContentId(media: MediaRef): string | null {
-  if (media.ids.imdb && /^tt\d+$/i.test(String(media.ids.imdb))) return String(media.ids.imdb)
-  for (const namespace of ['tmdb', 'tvdb', 'trakt', 'simkl'] as const) {
+function nuvioContentIds(media: MediaRef): string[] {
+  const ids: string[] = []
+  const add = (value: string | null) => {
+    if (value && !ids.includes(value)) ids.push(value)
+  }
+  if (media.ids.tmdb !== undefined && media.ids.tmdb !== null && String(media.ids.tmdb).trim()) {
+    add(`tmdb:${media.ids.tmdb}`)
+  }
+  if (media.ids.imdb && /^tt\d+$/i.test(String(media.ids.imdb))) add(String(media.ids.imdb))
+  for (const namespace of ['tvdb', 'trakt', 'simkl'] as const) {
     const value = media.ids[namespace]
     if (value !== undefined && value !== null && String(value).trim()) {
-      return `${namespace}:${value}`
+      add(`${namespace}:${value}`)
     }
   }
-  return media.ids.stremio ? String(media.ids.stremio) : firstExternalContentId(media)
+  if (media.ids.stremio) add(String(media.ids.stremio))
+  add(firstExternalContentId(media))
+  return ids
+}
+
+function nuvioContentId(media: MediaRef): string | null {
+  return nuvioContentIds(media)[0] || null
 }
 
 function stremioContentId(media: MediaRef): string | null {
@@ -578,16 +594,25 @@ async function traktGetAll(
   params: Record<string, any> = {}
 ): Promise<any[]> {
   const output: any[] = []
+  const seenPageStarts = new Set<string>()
   for (let page = 1; page <= 200; page++) {
-    const response = await traktRequest(connection, path, { ...params, page, limit: 250 })
+    const response = await traktRequest(connection, path, { ...params, page, limit: TRAKT_PAGE_SIZE })
     const rows = Array.isArray(response.data) ? response.data : []
+    if (!rows.length) break
+    // Some Trakt endpoints paginate without exposing their pagination headers
+    // through CORS, while legacy watched endpoints can ignore page entirely.
+    // Continue until an empty page, but stop before appending a repeated first
+    // row so an unpaginated endpoint cannot create an infinite duplicate loop.
+    const pageStart = JSON.stringify(rows[0])
+    if (seenPageStarts.has(pageStart)) break
+    seenPageStarts.add(pageStart)
     output.push(...rows)
     const pages = Number(
       response.headers.get('x-pagination-page-count')
       || response.headers.get('X-Pagination-Page-Count')
       || 0
     )
-    if (!rows.length || (pages && page >= pages) || (!pages && rows.length < 250)) break
+    if (pages && page >= pages) break
   }
   return output
 }
@@ -2123,12 +2148,10 @@ async function pullTrakt(options: PullOptions): Promise<PullResult> {
   if (scopes.history) {
     logTo(log, 'Reading Trakt watched movies and episodes...')
     let omittedPlayEvents = 0
-    const [movieResponse, showResponse] = await Promise.all([
-      traktRequest(connection, '/sync/watched/movies', { extended: 'full' }),
-      traktRequest(connection, '/sync/watched/shows', { extended: 'full' })
+    const [movies, shows] = await Promise.all([
+      traktGetAll(connection, '/sync/watched/movies', { extended: 'full' }),
+      traktGetAll(connection, '/sync/watched/shows', { extended: 'full' })
     ])
-    const movies = Array.isArray(movieResponse.data) ? movieResponse.data : []
-    const shows = Array.isArray(showResponse.data) ? showResponse.data : []
     for (const item of movies) {
       const media = mediaFromTrakt(item.movie, 'movie')
       const playCount = positiveNumber(item.plays, 1)
@@ -2600,6 +2623,96 @@ function cleanNuvioLibraryItem(item: any) {
   return cleaned
 }
 
+interface NuvioLibraryImport {
+  item: Record<string, any>
+  media: MediaRef
+}
+
+interface NuvioMetadataResult {
+  content_id: string | number
+  posterUrl?: string | null
+  releaseDate?: string | null
+  retryable?: boolean
+}
+
+async function enrichNuvioMetadataChunk(
+  items: readonly Record<string, any>[],
+  attempt = 0
+): Promise<NuvioMetadataResult[]> {
+  try {
+    const { data } = await requestBridgeJson<{ results?: NuvioMetadataResult[] }>(
+      '/api/trakt/enrich-metadata',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items })
+      }
+    )
+    const results = Array.isArray(data?.results) ? data.results : []
+    const retryItems = items.filter((_, index) => results[index]?.retryable)
+    if (retryItems.length && attempt < 1) {
+      await sleep(500)
+      return [...results, ...await enrichNuvioMetadataChunk(retryItems, attempt + 1)]
+    }
+    return results
+  } catch (error: any) {
+    if (attempt < 1 && (error?.status === 429 || error?.status >= 500)) {
+      await sleep(1_000)
+      return enrichNuvioMetadataChunk(items, attempt + 1)
+    }
+    throw error
+  }
+}
+
+async function enrichNuvioLibraryImports(
+  imports: NuvioLibraryImport[],
+  log?: BridgeLog
+) {
+  if (!imports.length) return
+  logTo(log, `Enriching ${imports.length} imported Nuvio library titles with TMDB metadata...`)
+  const metadataItems = imports.map(({ item, media }) => ({
+    content_id: item.content_id,
+    content_type: item.content_type,
+    name: String(item.name || 'Untitled').slice(0, 256),
+    _ids: {
+      tmdb: media.ids.tmdb,
+      imdb: media.ids.imdb
+    }
+  }))
+  const metadataChunks = chunk(metadataItems, NUVIO_METADATA_BATCH_SIZE)
+  const results: NuvioMetadataResult[] = []
+
+  for (let offset = 0; offset < metadataChunks.length; offset += NUVIO_METADATA_BATCH_CONCURRENCY) {
+    const wave = metadataChunks.slice(offset, offset + NUVIO_METADATA_BATCH_CONCURRENCY)
+    const settled = await Promise.allSettled(wave.map(items => enrichNuvioMetadataChunk(items)))
+    for (const result of settled) {
+      if (result.status === 'fulfilled') {
+        results.push(...result.value)
+      } else {
+        const reason = result.reason instanceof Error
+          ? result.reason.message
+          : errorDetail(result.reason, 'metadata request failed')
+        logTo(log, `Warning: A Nuvio metadata batch failed (${reason}).`)
+      }
+    }
+    logTo(
+      log,
+      `Nuvio metadata batches complete: ${Math.min(offset + wave.length, metadataChunks.length)}/${metadataChunks.length}.`
+    )
+  }
+
+  const byContentId = new Map<string | number, NuvioMetadataResult>()
+  for (const result of results) byContentId.set(result.content_id, result)
+  for (const entry of imports) {
+    const metadata = byContentId.get(entry.item.content_id)
+    if (metadata?.posterUrl) {
+      entry.item.poster = metadata.posterUrl
+      entry.item.poster_shape = 'POSTER'
+    }
+    if (metadata?.releaseDate) entry.item.release_info = metadata.releaseDate
+  }
+}
+
 async function pullEntireNuvioLibrary(connection: BridgeConnection, profileId: number): Promise<any[]> {
   const output: any[] = []
   for (let offset = 0; offset < 100_000; offset += 500) {
@@ -2688,27 +2801,50 @@ async function pushNuvio(options: PushOptions): Promise<PushResult> {
     const existing = await pullEntireNuvioLibrary(connection, profileId)
     const merged = new Map<string, any>()
     for (const item of existing) merged.set(`${item.content_type}:${item.content_id}`, cleanNuvioLibraryItem(item))
+    const imports: NuvioLibraryImport[] = []
     for (const record of bundle.library) {
       const contentId = nuvioContentId(record.media)
       if (!contentId) {
         issues.push({ scope: 'library', status: 'unresolved', media: record.media, reason: 'Nuvio needs a supported content ID for this library item.' })
         continue
       }
-      const key = `${record.media.kind}:${contentId}`
-      const current = merged.get(key) || {}
-      merged.set(key, {
-        ...current,
-        content_id: contentId,
-        content_type: record.media.kind === 'movie' ? 'movie' : 'series',
-        name: record.media.title || current.name || 'Untitled',
-        added_at: Math.max(Number(current.added_at || 0), record.addedAt || Date.now())
+      imports.push({
+        media: record.media,
+        item: {
+          content_id: contentId,
+          content_type: record.media.kind === 'movie' ? 'movie' : 'series',
+          name: record.media.title || 'Untitled',
+          added_at: record.addedAt || Date.now()
+        }
       })
       written.library++
     }
-    await nuvioRpc(connection, 'sync_push_library', {
-      p_profile_id: profileId,
-      p_items: [...merged.values()]
-    })
+    await enrichNuvioLibraryImports(imports, log)
+    for (const { item, media } of imports) {
+      const key = `${item.content_type}:${item.content_id}`
+      let current = merged.get(key) || {}
+      // A previous bridge version stored IMDb first. When the same source row
+      // now provides TMDB, fold that legacy entry into the preferred key so a
+      // rerun repairs metadata instead of leaving a duplicate saved title.
+      for (const candidateId of nuvioContentIds(media)) {
+        const candidateKey = `${item.content_type}:${candidateId}`
+        if (candidateKey === key || !merged.has(candidateKey)) continue
+        current = { ...merged.get(candidateKey), ...current }
+        merged.delete(candidateKey)
+      }
+      merged.set(key, {
+        ...current,
+        ...item,
+        name: item.name || current.name || 'Untitled',
+        added_at: Math.max(Number(current.added_at || 0), Number(item.added_at || 0))
+      })
+    }
+    if (imports.length) {
+      await nuvioRpc(connection, 'sync_push_library', {
+        p_profile_id: profileId,
+        p_items: [...merged.values()]
+      })
+    }
     logTo(log, `Merged ${written.library} titles into the Nuvio library without removing existing items.`)
   }
 

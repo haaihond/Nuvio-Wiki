@@ -280,12 +280,24 @@ function progressEquivalent(source: ProgressRecord, destination: ProgressRecord)
   return durationNear && Math.abs(sourcePosition - destinationPosition) <= 5_000
 }
 
+function needsNuvioLibraryTmdbUpgrade(source: ScopedRecord, destination: ScopedRecord): boolean {
+  const sourceTmdb = String(source.media.ids.tmdb ?? '').trim()
+  const destinationTmdb = String(destination.media.ids.tmdb ?? '').trim()
+  return Boolean(sourceTmdb)
+    && !destinationTmdb
+    && destination.source?.service === 'nuvio'
+}
+
 function classifyRecord(
   scope: BridgeScope,
   source: ScopedRecord,
   destination: ScopedRecord | undefined
 ): Extract<PreviewOutcome, 'add' | 'update' | 'already-present'> {
   if (!destination) return 'add'
+
+  if (scope === 'library' && needsNuvioLibraryTmdbUpgrade(source, destination)) {
+    return 'update'
+  }
 
   if (scope === 'history') {
     const sourceHistory = source as HistoryRecord

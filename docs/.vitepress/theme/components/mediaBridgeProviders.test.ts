@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createEmptyBundle } from './mediaBridgeCore.ts'
 import {
+  inspectDestinationMappings,
   pullMediaBridge,
   pullMediaBridgeForVerification,
   pushMediaBridge,
@@ -51,6 +52,24 @@ function stremioConnection(): BridgeConnection {
     credentials: {
       service: 'stremio',
       authKey: 'test-auth-key'
+    }
+  }
+}
+
+function nuvioConnection(): BridgeConnection {
+  return {
+    slot: 'destination',
+    service: 'nuvio',
+    accountId: 'nuvio-user',
+    profileId: 1,
+    displayName: 'Nuvio User · Main',
+    credentials: {
+      service: 'nuvio',
+      publicKey: 'test-public-key',
+      session: {
+        access_token: 'test-access-token',
+        expires_at: Math.floor(Date.now() / 1000) + 3_600
+      }
     }
   }
 }
@@ -327,6 +346,209 @@ test('only reports omitted Trakt replay timestamps when Trakt is the source', as
   assert.equal(source.issues.length, 1)
   assert.match(source.issues[0].reason, /2 earlier play events cannot be transferred/)
   assert.deepEqual(destination.issues, [])
+})
+
+test('reads every Trakt watched page when pagination headers are unavailable', async t => {
+  const requestedPages: string[] = []
+  t.mock.method(globalThis, 'fetch', async input => {
+    const url = new URL(String(input))
+    const page = Number(url.searchParams.get('page') || 1)
+    assert.equal(url.searchParams.get('limit'), '100')
+    requestedPages.push(`${url.pathname}:${page}`)
+
+    if (url.pathname === '/sync/watched/movies') {
+      if (page === 1) {
+        return Response.json(Array.from({ length: 100 }, (_, index) => ({
+          plays: 1,
+          last_watched_at: `2026-07-17T${String(index % 24).padStart(2, '0')}:00:00Z`,
+          movie: {
+            title: `Movie ${index + 1}`,
+            year: 2024,
+            ids: {
+              trakt: index + 1,
+              imdb: `tt${String(index + 1).padStart(7, '0')}`,
+              tmdb: index + 1
+            }
+          }
+        })))
+      }
+      if (page === 2) {
+        return Response.json([{
+          plays: 1,
+          last_watched_at: '2026-07-18T12:00:00Z',
+          movie: {
+            title: 'Movie 101',
+            year: 2024,
+            ids: { trakt: 101, imdb: 'tt0000101', tmdb: 101 }
+          }
+        }])
+      }
+      return Response.json([])
+    }
+
+    if (url.pathname === '/sync/watched/shows') {
+      // This legacy endpoint can ignore page. Returning the same row verifies
+      // that the bridge stops on repetition without appending duplicates.
+      return Response.json([{
+        show: {
+          title: 'Paged Series',
+          year: 2024,
+          ids: { trakt: 501, imdb: 'tt9000501', tmdb: 501 }
+        },
+        seasons: [{
+          number: 1,
+          episodes: [
+            { number: 1, plays: 1, last_watched_at: '2026-07-17T12:00:00Z' },
+            { number: 2, plays: 1, last_watched_at: '2026-07-18T12:00:00Z' }
+          ]
+        }]
+      }])
+    }
+    throw new Error(`Unexpected request: ${url.pathname}`)
+  })
+
+  const result = await pullMediaBridge({
+    connection: traktConnection('source'),
+    scopes: { history: true, progress: false, library: false }
+  })
+
+  assert.equal(result.bundle.history.length, 103)
+  assert.equal(result.bundle.history.filter(record => record.media.kind === 'movie').length, 101)
+  assert.equal(result.bundle.history.filter(record => record.media.kind === 'series').length, 2)
+  assert.deepEqual(result.issues, [])
+  assert.deepEqual(requestedPages.filter(value => value.startsWith('/sync/watched/movies')), [
+    '/sync/watched/movies:1',
+    '/sync/watched/movies:2',
+    '/sync/watched/movies:3'
+  ])
+  assert.deepEqual(requestedPages.filter(value => value.startsWith('/sync/watched/shows')), [
+    '/sync/watched/shows:1',
+    '/sync/watched/shows:2'
+  ])
+})
+
+test('writes TMDB-first Nuvio IDs and enriches imported library metadata', async t => {
+  let watchedItems: any[] = []
+  let metadataItems: any[] = []
+  let libraryItems: any[] = []
+  t.mock.method(globalThis, 'fetch', async (input, init) => {
+    const url = new URL(String(input), 'https://nuvio.wiki')
+    const body = JSON.parse(String(init?.body || '{}'))
+    if (url.pathname === '/rest/v1/rpc/sync_push_watched_items') {
+      watchedItems = body.p_items
+      return Response.json(null)
+    }
+    if (url.pathname === '/rest/v1/rpc/sync_pull_library') {
+      return Response.json([{
+        content_id: 'tt2015381',
+        content_type: 'movie',
+        name: 'Guardians of the Galaxy',
+        added_at: Date.UTC(2026, 6, 15)
+      }])
+    }
+    if (url.pathname === '/api/trakt/enrich-metadata') {
+      metadataItems = body.items
+      return Response.json({
+        results: body.items.map((item: any) => ({
+          content_id: item.content_id,
+          posterUrl: 'https://image.tmdb.org/t/p/w500/poster.jpg',
+          releaseDate: '2014-08-01',
+          source: 'tmdb'
+        }))
+      })
+    }
+    if (url.pathname === '/rest/v1/rpc/sync_push_library') {
+      libraryItems = body.p_items
+      return Response.json(null)
+    }
+    throw new Error(`Unexpected request: ${url.pathname}`)
+  })
+
+  const media = {
+    kind: 'movie' as const,
+    ids: { imdb: 'tt2015381', tmdb: 118340, trakt: 28 },
+    title: 'Guardians of the Galaxy',
+    year: 2014
+  }
+  const bundle = createEmptyBundle()
+  bundle.history.push({ media, watchedAt: Date.UTC(2026, 6, 17), playCount: 1 })
+  bundle.library.push({
+    media,
+    addedAt: Date.UTC(2026, 6, 16),
+    lists: [{ service: 'trakt', accountId: 'test-account', kind: 'watchlist' }]
+  })
+
+  const result = await pushMediaBridge({
+    connection: nuvioConnection(),
+    bundle,
+    scopes: { history: true, progress: false, library: true }
+  })
+
+  assert.equal(result.written.history, 1)
+  assert.equal(result.written.library, 1)
+  assert.equal(watchedItems[0].content_id, 'tmdb:118340')
+  assert.equal(metadataItems[0].content_id, 'tmdb:118340')
+  assert.deepEqual(metadataItems[0]._ids, { tmdb: 118340, imdb: 'tt2015381' })
+  assert.equal(libraryItems.length, 1)
+  assert.equal(libraryItems.some(item => item.content_id === 'tt2015381'), false)
+  assert.equal(libraryItems[0].content_id, 'tmdb:118340')
+  assert.equal(libraryItems[0].poster, 'https://image.tmdb.org/t/p/w500/poster.jpg')
+  assert.equal(libraryItems[0].poster_shape, 'POSTER')
+  assert.equal(libraryItems[0].release_info, '2014-08-01')
+  assert.deepEqual(result.issues, [])
+})
+
+test('uses the TMDB show ID when preflighting Trakt episodes against Nuvio metadata', async t => {
+  let requestedMetadataId = ''
+  t.mock.method(globalThis, 'fetch', async input => {
+    const url = new URL(String(input))
+    if (url.pathname === '/rest/v1/addons') {
+      return Response.json([{
+        url: 'https://meta.test/manifest.json',
+        enabled: true,
+        sort_order: 1,
+        profile_id: 1
+      }])
+    }
+    if (url.pathname === '/manifest.json') {
+      return Response.json({ resources: ['meta'] })
+    }
+    if (url.pathname.startsWith('/meta/series/')) {
+      requestedMetadataId = decodeURIComponent(url.pathname.split('/').at(-1)!.replace(/\.json$/, ''))
+      if (requestedMetadataId !== 'tmdb:1399') return new Response(null, { status: 404 })
+      return Response.json({
+        meta: {
+          videos: [{ id: 'tmdb:1399:1:2', season: 1, episode: 2, title: 'The Kingsroad' }]
+        }
+      })
+    }
+    throw new Error(`Unexpected request: ${url.pathname}`)
+  })
+
+  const bundle = createEmptyBundle()
+  bundle.history.push({
+    media: {
+      kind: 'series',
+      ids: { imdb: 'tt0944947', tmdb: 1399, trakt: 1390 },
+      title: 'Game of Thrones',
+      season: 1,
+      episode: 2,
+      episodeTitle: 'The Kingsroad'
+    },
+    watchedAt: Date.UTC(2026, 6, 17),
+    playCount: 1
+  })
+
+  const mappings = await inspectDestinationMappings(
+    nuvioConnection(),
+    bundle,
+    { history: true, progress: false, library: false }
+  )
+
+  assert.equal(requestedMetadataId, 'tmdb:1399')
+  assert.equal(mappings.length, 1)
+  assert.equal(mappings[0].mapping.status, 'mapped')
+  assert.equal(mappings[0].mapping.target?.videoId, 'tmdb:1399:1:2')
 })
 
 test('signs in to a Jellyfin server without keeping the password in the connection result', async t => {

@@ -177,6 +177,42 @@ test('matches history, progress, and library through shared secondary IDs', () =
   assert.equal(plan.transfer.library.length, 0)
 })
 
+test('upgrades an existing Nuvio IMDb library identity when the source has TMDB', () => {
+  const source = createEmptyBundle()
+  const destination = createEmptyBundle()
+  source.library.push({
+    media: {
+      kind: 'movie',
+      ids: { imdb: 'tt2015381', tmdb: 118340 },
+      title: 'Guardians of the Galaxy'
+    },
+    addedAt: 100,
+    lists: [{ service: 'trakt', kind: 'watchlist' }],
+    source: { service: 'trakt' }
+  })
+  destination.library.push({
+    media: {
+      kind: 'movie',
+      ids: { imdb: 'tt2015381' },
+      title: 'Guardians of the Galaxy'
+    },
+    addedAt: 200,
+    lists: [{ service: 'nuvio', kind: 'library' }],
+    source: { service: 'nuvio', profileId: 1 }
+  })
+
+  const plan = planMediaBridgePreview({
+    source,
+    destination,
+    scopes: { history: false, progress: false, library: true }
+  })
+
+  assert.equal(plan.stats.update, 1)
+  assert.equal(plan.stats.alreadyPresent, 0)
+  assert.equal(plan.transfer.library.length, 1)
+  assert.equal(plan.transfer.library[0].media.ids.tmdb, 118340)
+})
+
 test('does not match equal numeric IDs from different namespaces', () => {
   const source = createEmptyBundle()
   const destination = createEmptyBundle()
