@@ -498,8 +498,42 @@ export function normalizeTitle(value: unknown): string {
     .replace(/\s+/g, ' ')
 }
 
+/**
+ * Returns the media title without episode coordinates. Older bridge versions
+ * wrote a redundant SxEy suffix into Nuvio's title field even though season
+ * and episode are stored separately. Strip that exact legacy suffix at the
+ * boundary so it is not displayed or copied into another provider again.
+ */
+export function mediaTitle(media: MediaRef): string {
+  const fallback = String(
+    media.ids.imdb
+      || media.ids.tmdb
+      || media.ids.trakt
+      || media.ids.simkl
+      || media.ids.stremio
+      || `Untitled ${media.kind}`
+  )
+  const title = String(media.title || '').trim() || fallback
+  if (media.kind !== 'series') return title
+
+  let clean = title
+  if (validSeason(media.season) && validEpisode(media.episode)) {
+    clean = clean.replace(
+      new RegExp(`\\s*(?:[·\\-–—]\\s*)?S0*${media.season}\\s*E0*${media.episode}\\s*$`, 'i'),
+      ''
+    ).trim()
+  }
+  if (validEpisode(media.absoluteEpisode)) {
+    clean = clean.replace(
+      new RegExp(`\\s*(?:[·\\-–—]\\s*)?Episode\\s+0*${media.absoluteEpisode}\\s*$`, 'i'),
+      ''
+    ).trim()
+  }
+  return clean || title
+}
+
 function titleYearMediaKey(media: MediaRef): string | null {
-  const title = normalizeTitle(media.title)
+  const title = normalizeTitle(mediaTitle(media))
   const year = Number(media.year)
   if (!title || !Number.isInteger(year) || year <= 0) return null
   return `${media.kind}:title:${title.replace(/\s+/g, '-')}:${year}`

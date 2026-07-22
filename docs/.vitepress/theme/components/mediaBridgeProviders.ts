@@ -3,6 +3,7 @@ import {
   createEmptyBundle,
   dedupeBundle,
   mediaAliasKeys,
+  mediaTitle,
   normalizeTitle,
   parseStremioVideoId,
   remapEpisode,
@@ -489,7 +490,7 @@ function sourceOf(connection: BridgeConnection) {
 }
 
 function mediaLabel(media: MediaRef): string {
-  const title = media.title || media.ids.imdb || media.ids.stremio || media.ids.tmdb || 'Untitled'
+  const title = mediaTitle(media)
   return media.kind === 'series' && media.season !== undefined && media.episode !== undefined
     ? `${title} S${media.season}E${media.episode}`
     : String(title)
@@ -2778,9 +2779,7 @@ async function pushNuvio(options: PushOptions): Promise<PushResult> {
       rows.push({
         content_id: contentId,
         content_type: record.media.kind === 'movie' ? 'movie' : 'series',
-        title: record.media.kind === 'series'
-          ? mediaLabel(record.media)
-          : record.media.title || mediaLabel(record.media),
+        title: mediaTitle(record.media),
         ...(record.media.kind === 'series' ? { season: record.media.season, episode: record.media.episode } : {}),
         watched_at: record.watchedAt
       })

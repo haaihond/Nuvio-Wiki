@@ -539,8 +539,60 @@ test('applies a deterministic episode remap before comparison and transfer', () 
   assert.equal(plan.stats.remapped, 1)
   assert.equal(plan.transfer.history[0].media.episode, 3)
   assert.equal(plan.rows[0].remapped, true)
+  assert.equal(plan.rows[0].title, 'Remapped Show')
   assert.match(plan.rows[0].outcomeLabel, /remapped/)
   assert.notEqual(plan.rows[0].sourceKey, plan.rows[0].targetKey)
+})
+
+test('treats an existing destination episode as authoritative', () => {
+  const source = createEmptyBundle()
+  const destination = createEmptyBundle()
+  const sourceMedia = {
+    ...episode('tt0944947', 'Game of Thrones', 1, 5),
+    videoId: 'source:episode-5'
+  }
+  const destinationMedia = {
+    ...episode('tt0944947', 'Game of Thrones S1E5', 1, 5),
+    episodeTitle: 'The Wolf and the Lion',
+    videoId: 'destination:episode-5'
+  }
+  source.history.push({ media: sourceMedia, watchedAt: 500 })
+  destination.history.push({ media: destinationMedia, watchedAt: 100 })
+
+  const plan = planMediaBridgePreview({
+    source,
+    destination,
+    scopes: ALL_SCOPES,
+    mappingIssues: [{
+      scope: 'history',
+      sourceMedia,
+      mapping: {
+        status: 'mapped',
+        confidence: 'high',
+        target: {
+          season: 1,
+          episode: 5,
+          title: 'The Wolf and the Lion',
+          videoId: 'destination:episode-5'
+        },
+        candidates: [{
+          season: 1,
+          episode: 5,
+          title: 'The Wolf and the Lion',
+          videoId: 'destination:episode-5'
+        }],
+        reason: 'Season and episode numbering match.'
+      }
+    }]
+  })
+
+  assert.equal(plan.stats.update, 1)
+  assert.equal(plan.stats.remapped, 0)
+  assert.equal(plan.rows[0].remapped, false)
+  assert.equal(plan.rows[0].outcomeLabel, 'Update destination')
+  assert.equal(plan.rows[0].title, 'Game of Thrones')
+  assert.equal(plan.rows[0].detail, 'Destination item already exists; only its sync state will be updated.')
+  assert.deepEqual(plan.transfer.history[0].media, destinationMedia)
 })
 
 test('automatically treats records without a canonical key as unresolved', () => {

@@ -6,6 +6,7 @@ import {
   dedupeBundle,
   episodeAliasKeys,
   mediaAliasKeys,
+  mediaTitle,
   normalizeTitle,
   type BridgeScope,
   type CanonicalBundle,
@@ -96,7 +97,7 @@ function recordAliasKeys(media: MediaRef): string[] {
 }
 
 function titleYearRecordKeys(media: MediaRef): string[] {
-  const title = normalizeTitle(media.title)
+  const title = normalizeTitle(mediaTitle(media))
   const year = Number(media.year)
   if (!title || !Number.isInteger(year) || year <= 0) return []
 
@@ -210,17 +211,7 @@ function cloneRecordWithMedia(
 }
 
 function displayTitle(media: MediaRef): string {
-  const base = String(media.title || '').trim()
-    || String(media.ids.imdb || media.ids.tmdb || media.ids.trakt || media.ids.simkl || media.ids.stremio || '')
-    || `Untitled ${media.kind}`
-  if (media.kind !== 'series') return base
-  if (Number.isInteger(media.season) && Number.isInteger(media.episode)) {
-    return `${base} · S${media.season}E${media.episode}`
-  }
-  if (Number.isInteger(media.absoluteEpisode)) {
-    return `${base} · Episode ${media.absoluteEpisode}`
-  }
-  return base
+  return mediaTitle(media)
 }
 
 function outcomeLabel(outcome: PreviewOutcome, remapped: boolean): string {
@@ -417,12 +408,9 @@ function pushTransferRecord(bundle: CanonicalBundle, scope: BridgeScope, record:
   else bundle.library.push(record as LibraryRecord)
 }
 
-function mappingChanged(source: MediaRef, target: MediaRef): boolean {
+function episodeCoordinatesChanged(source: MediaRef, target: MediaRef): boolean {
   return source.season !== target.season
     || source.episode !== target.episode
-    || source.absoluteEpisode !== target.absoluteEpisode
-    || source.videoId !== target.videoId
-    || normalizeTitle(source.episodeTitle) !== normalizeTitle(target.episodeTitle)
 }
 
 function stableRows(rows: PendingRow[]): PreviewRow[] {
@@ -516,7 +504,6 @@ export function planMediaBridgePreview(input: MediaBridgePlanInput): MediaBridge
       const mappedMedia = issue
         ? cloneMediaWithMapping(originalMedia, issue.mapping)
         : { ...originalMedia, ids: cloneMediaIds(originalMedia.ids) }
-      const remapped = Boolean(issue?.mapping.status === 'mapped' && mappingChanged(originalMedia, mappedMedia))
       const targetKey = canonicalRecordKey(mappedMedia)
 
       if (!targetKey) {
@@ -549,13 +536,21 @@ export function planMediaBridgePreview(input: MediaBridgePlanInput): MediaBridge
           )
         : findDestinationRecord(destinationByScope[scope], mappedMedia, scope)
       const outcome = classifyRecord(scope, plannedRecord, destinationRecord)
+      // Existing destination records are authoritative. Provider ID, title, and
+      // absolute-number translations must neither overwrite them nor count as a
+      // remap. Only a newly added record with changed visible coordinates is a
+      // genuine episode remap.
+      const remapped = Boolean(
+        !destinationRecord
+        && issue?.mapping.status === 'mapped'
+        && episodeCoordinatesChanged(originalMedia, mappedMedia)
+      )
       stats[outcome === 'already-present' ? 'alreadyPresent' : outcome]++
       if (remapped) stats.remapped++
       if (outcome === 'add' || outcome === 'update') {
-        // A Continue Watching update changes playback state only. Preserve the
-        // destination provider's established ID and metadata instead of
-        // replacing them with the source provider's representation.
-        const transferRecord = scope === 'progress' && outcome === 'update' && destinationRecord
+        // Existing history and Continue Watching entries change sync state only.
+        // Preserve the destination provider's established identity and metadata.
+        const transferRecord = scope !== 'library' && destinationRecord
           ? cloneRecordWithMedia(scope, plannedRecord, destinationRecord.media)
           : plannedRecord
         pushTransferRecord(transfer, scope, transferRecord)
@@ -565,15 +560,19 @@ export function planMediaBridgePreview(input: MediaBridgePlanInput): MediaBridge
         stableKey: targetKey,
         sequence: sequence++,
         scope,
-        mediaKind: mappedMedia.kind,
-        title: displayTitle(mappedMedia),
+        mediaKind: destinationRecord?.media.kind || mappedMedia.kind,
+        title: displayTitle(destinationRecord?.media || mappedMedia),
         outcome,
         outcomeLabel: outcomeLabel(outcome, remapped),
         sourceKey,
         targetKey,
         remapped,
         mappingConfidence: issue?.mapping.confidence || null,
-        detail: issue?.mapping.reason || outcomeLabel(outcome, false)
+        detail: destinationRecord
+          ? outcome === 'already-present'
+            ? 'Destination item already exists and is unchanged.'
+            : 'Destination item already exists; only its sync state will be updated.'
+          : issue?.mapping.reason || outcomeLabel(outcome, false)
       })
     }
   }

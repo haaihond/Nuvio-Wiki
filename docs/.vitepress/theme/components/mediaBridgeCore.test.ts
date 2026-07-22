@@ -13,6 +13,7 @@ import {
   episodeAliasKeys,
   generateRoutePairs,
   mediaAliasKeys,
+  mediaTitle,
   normalizeTitle,
   parseStremioVideoId,
   remapEpisode,
@@ -166,6 +167,17 @@ test('builds canonical keys by stable ID priority and episode coordinates', () =
     ids: { imdb: 'tt123' },
     videoId: 'tt123:4:7'
   }), 'series:imdb:tt123:season:4:episode:7')
+
+  const legacyEpisode: MediaRef = {
+    kind: 'series',
+    ids: {},
+    title: 'Game of Thrones S0E44',
+    year: 2011,
+    season: 0,
+    episode: 44
+  }
+  assert.equal(mediaTitle(legacyEpisode), 'Game of Thrones')
+  assert.equal(canonicalEpisodeKey(legacyEpisode), 'series:title:game-of-thrones:2011:season:0:episode:44')
 })
 
 test('exposes namespace-safe media and episode aliases for secondary-ID matching', () => {

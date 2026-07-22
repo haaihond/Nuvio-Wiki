@@ -700,6 +700,17 @@ test('writes TMDB-first Nuvio IDs and enriches imported library metadata', async
   }
   const bundle = createEmptyBundle()
   bundle.history.push({ media, watchedAt: Date.UTC(2026, 6, 17), playCount: 1 })
+  bundle.history.push({
+    media: {
+      kind: 'series',
+      ids: { imdb: 'tt0944947', tmdb: 1399 },
+      title: 'Game of Thrones S0E44',
+      season: 0,
+      episode: 44
+    },
+    watchedAt: Date.UTC(2026, 6, 18),
+    playCount: 1
+  })
   bundle.library.push({
     media,
     addedAt: Date.UTC(2026, 6, 16),
@@ -712,9 +723,13 @@ test('writes TMDB-first Nuvio IDs and enriches imported library metadata', async
     scopes: { history: true, progress: false, library: true }
   })
 
-  assert.equal(result.written.history, 1)
+  assert.equal(result.written.history, 2)
   assert.equal(result.written.library, 1)
   assert.equal(watchedItems[0].content_id, 'tmdb:118340')
+  const watchedEpisode = watchedItems.find(item => item.content_type === 'series')
+  assert.equal(watchedEpisode.title, 'Game of Thrones')
+  assert.equal(watchedEpisode.season, 0)
+  assert.equal(watchedEpisode.episode, 44)
   assert.equal(metadataItems[0].content_id, 'tmdb:118340')
   assert.deepEqual(metadataItems[0]._ids, { tmdb: 118340, imdb: 'tt2015381' })
   assert.equal(libraryItems.length, 1)
