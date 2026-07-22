@@ -1244,18 +1244,21 @@ export async function identifyOAuthConnection(
       displayName: String(user?.name || user?.username || user?.ids?.slug || accountId)
     }
   }
-  if (slot !== 'destination') {
-    throw new Error('Simkl can only be used as an import destination in the Sync Bridge.')
-  }
   const { data } = await simklRequest(temporary, '/users/settings', {}, { method: 'POST' })
   const user = data?.user || data
   const account = data?.account || {}
-  const accountType = String(account?.type || '').trim().toLowerCase()
-  if (accountType === 'free') {
-    throw new Error('Importing to Simkl is not available for Free accounts. A Simkl Pro or VIP account is required.')
-  }
-  if (accountType !== 'pro' && accountType !== 'vip') {
-    throw new Error('Could not verify a Simkl Pro or VIP account, so importing to Simkl is not available.')
+  let accountType: SimklAccountType | undefined
+  if (slot === 'destination') {
+    const rawAccountType = String(account?.type || '').trim().toLowerCase()
+    accountType = (
+      rawAccountType === 'free' || rawAccountType === 'pro' || rawAccountType === 'vip'
+    ) ? rawAccountType : undefined
+    if (accountType === 'free') {
+      throw new Error('Importing to Simkl is not available for Free accounts. A Simkl Pro or VIP account is required.')
+    }
+    if (accountType !== 'pro' && accountType !== 'vip') {
+      throw new Error('Could not verify a Simkl Pro or VIP account, so importing to Simkl is not available.')
+    }
   }
   const accountId = String(
     account?.id
@@ -1271,7 +1274,7 @@ export async function identifyOAuthConnection(
   return {
     ...temporary,
     accountId,
-    simklAccountType: accountType,
+    ...(accountType ? { simklAccountType: accountType } : {}),
     displayName: String(user?.name || user?.username || user?.email || accountId)
   }
 }

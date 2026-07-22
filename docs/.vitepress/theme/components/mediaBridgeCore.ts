@@ -44,7 +44,7 @@ export const SERVICE_DEFINITIONS: Record<ServiceId, ServiceDefinition> = {
       library: 'Watchlist'
     },
     capabilities: {
-      read: { history: false, progress: false, library: false },
+      read: { ...FULL_SCOPES },
       write: { ...FULL_SCOPES },
       profiles: false,
       nativeLists: ['watchlist']

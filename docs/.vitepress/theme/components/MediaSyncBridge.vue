@@ -68,9 +68,9 @@ const { lang } = useData()
 const isDutch = computed(() => String(lang.value || '').startsWith('nl'))
 const copy = computed(() => isDutch.value ? {
   title: 'Sync Bridge',
-  subtitle: 'Importeer kijkgeschiedenis, voortgang en opgeslagen titels naar Simkl, of verplaats ze tussen Stremio, Trakt, Plex, Jellyfin en Nuvio.',
+  subtitle: 'Verplaats kijkgeschiedenis, voortgang en opgeslagen titels tussen Simkl, Stremio, Trakt, Plex, Jellyfin en Nuvio.',
   info: 'Koppel een bron en bestemming en start direct met synchroniseren. Een voorbeeld bekijken is optioneel. Bestaande bestemmingsgegevens blijven behouden.',
-  simklImportAccess: 'Simkl kan alleen als bestemming worden gebruikt. Importeren naar Simkl vereist een Simkl Pro- of VIP-account.',
+  simklImportAccess: 'Importeren naar Simkl vereist een Simkl Pro- of VIP-account. Exporteren vanuit Simkl is voor iedereen beschikbaar.',
   simklUpgrade: 'Koop Simkl Pro of VIP',
   source: 'Bron',
   destination: 'Bestemming',
@@ -151,9 +151,9 @@ const copy = computed(() => isDutch.value ? {
   supportButton: 'Support me on Ko-fi'
 } : {
   title: 'Sync Bridge',
-  subtitle: 'Import watch history, playback progress, and saved titles into Simkl, or move them between Stremio, Trakt, Plex, Jellyfin, and Nuvio.',
+  subtitle: 'Move watch history, playback progress, and saved titles between Simkl, Stremio, Trakt, Plex, Jellyfin, and Nuvio.',
   info: 'Connect a source and destination and start syncing directly. Previewing changes is optional. Existing destination data is preserved.',
-  simklImportAccess: 'Simkl is destination-only. Importing to Simkl requires a Simkl Pro or VIP account.',
+  simklImportAccess: 'Importing to Simkl requires a Simkl Pro or VIP account. Exporting from Simkl is available to everyone.',
   simklUpgrade: 'Get Simkl Pro or VIP',
   source: 'Source',
   destination: 'Destination',

@@ -87,20 +87,24 @@ test('rejects Simkl Free accounts as import destinations', async t => {
   assert.equal(fetchMock.mock.callCount(), 1)
 })
 
-test('rejects Simkl as a source before reading account settings', async t => {
-  const fetchMock = t.mock.method(globalThis, 'fetch', async () => {
-    throw new Error('should not fetch')
+test('allows Simkl Free accounts as export sources', async t => {
+  const fetchMock = t.mock.method(globalThis, 'fetch', async (_input, init) => {
+    assert.equal(init?.method, 'POST')
+    return Response.json({
+      user: { name: 'free-exporter' },
+      account: { id: 404, type: 'free' }
+    })
   })
 
-  await assert.rejects(
-    identifyOAuthConnection('source', {
-      service: 'simkl',
-      clientId: 'test-client',
-      accessToken: 'test-token'
-    }),
-    /only be used as an import destination/
-  )
-  assert.equal(fetchMock.mock.callCount(), 0)
+  const connection = await identifyOAuthConnection('source', {
+    service: 'simkl',
+    clientId: 'test-client',
+    accessToken: 'test-token'
+  })
+  assert.equal(connection.slot, 'source')
+  assert.equal(connection.simklAccountType, undefined)
+  assert.equal(connection.displayName, 'free-exporter')
+  assert.equal(fetchMock.mock.callCount(), 1)
 })
 
 test('blocks Simkl writes when a paid plan was not verified', async t => {

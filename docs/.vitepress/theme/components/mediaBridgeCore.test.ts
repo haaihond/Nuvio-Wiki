@@ -46,9 +46,11 @@ test('defines six services and generates every directional pair', () => {
 
   for (const service of SERVICE_IDS) {
     assert.equal(SERVICE_DEFINITIONS[service].id, service)
-    assert.deepEqual(SERVICE_DEFINITIONS[service].capabilities.read, service === 'simkl'
-      ? { history: false, progress: false, library: false }
-      : { history: true, progress: true, library: true })
+    assert.deepEqual(SERVICE_DEFINITIONS[service].capabilities.read, {
+      history: true,
+      progress: true,
+      library: true
+    })
     assert.deepEqual(SERVICE_DEFINITIONS[service].capabilities.write, ['plex', 'jellyfin'].includes(service)
       ? { history: true, progress: true, library: false }
       : { history: true, progress: true, library: true })
@@ -56,9 +58,9 @@ test('defines six services and generates every directional pair', () => {
 
   assert.equal(ROUTE_PAIRS.filter(route => route.sameService).length, 6)
   assert.equal(summarizeRoute('simkl', 'nuvio').label, 'Simkl → Nuvio')
-  assert.equal(summarizeRoute('simkl', 'nuvio').enabledScopeCount, 0)
+  assert.equal(summarizeRoute('simkl', 'nuvio').enabledScopeCount, 3)
   assert.equal(summarizeRoute('trakt', 'simkl').enabledScopeCount, 3)
-  assert.deepEqual(serviceIdsForSlot('source'), ['stremio', 'trakt', 'plex', 'jellyfin', 'nuvio'])
+  assert.deepEqual(serviceIdsForSlot('source'), SERVICE_IDS)
   assert.deepEqual(serviceIdsForSlot('destination'), SERVICE_IDS)
   assert.deepEqual(summarizeRoute('trakt', 'plex').scopes.map(scope => [scope.scope, scope.supported]), [
     ['history', true],
