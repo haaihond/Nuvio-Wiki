@@ -787,6 +787,7 @@ async function preparePlan(
   const plan = planMediaBridgePreview({
     source: sourceResult.bundle,
     destination: destinationResult.bundle,
+    destinationService: destinationConnection.service,
     scopes: requestedScopes,
     mappingIssues
   })
@@ -905,6 +906,7 @@ async function runSync() {
       const remaining = planMediaBridgePreview({
         source: transfer,
         destination: verified.bundle,
+        destinationService: destinationConnection.service,
         scopes: verificationScopes
       })
       for (const scope of ['history', 'progress', 'library'] as const) {

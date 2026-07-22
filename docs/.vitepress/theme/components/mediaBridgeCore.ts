@@ -5,6 +5,7 @@ export type BridgeSlot = 'source' | 'destination'
 export type MediaKind = 'movie' | 'series'
 export type BridgeScope = 'history' | 'progress' | 'library'
 export type CanonicalListKind = 'watchlist' | 'collection' | 'library' | 'favorites' | 'other'
+export type HistoryWriteMode = 'events' | 'state'
 
 export interface SyncScopes {
   history: boolean
@@ -15,6 +16,7 @@ export interface SyncScopes {
 export interface ServiceCapabilities {
   read: SyncScopes
   write: SyncScopes
+  historyWriteMode: HistoryWriteMode
   profiles: boolean
   nativeLists: readonly CanonicalListKind[]
 }
@@ -46,6 +48,7 @@ export const SERVICE_DEFINITIONS: Record<ServiceId, ServiceDefinition> = {
     capabilities: {
       read: { ...FULL_SCOPES },
       write: { ...FULL_SCOPES },
+      historyWriteMode: 'state',
       profiles: false,
       nativeLists: ['watchlist']
     }
@@ -62,6 +65,7 @@ export const SERVICE_DEFINITIONS: Record<ServiceId, ServiceDefinition> = {
     capabilities: {
       read: { ...FULL_SCOPES },
       write: { ...FULL_SCOPES },
+      historyWriteMode: 'state',
       profiles: false,
       nativeLists: ['library']
     }
@@ -78,6 +82,7 @@ export const SERVICE_DEFINITIONS: Record<ServiceId, ServiceDefinition> = {
     capabilities: {
       read: { ...FULL_SCOPES },
       write: { ...FULL_SCOPES },
+      historyWriteMode: 'events',
       profiles: false,
       nativeLists: ['watchlist', 'collection']
     }
@@ -94,6 +99,7 @@ export const SERVICE_DEFINITIONS: Record<ServiceId, ServiceDefinition> = {
     capabilities: {
       read: { ...FULL_SCOPES },
       write: { history: true, progress: true, library: false },
+      historyWriteMode: 'state',
       profiles: false,
       nativeLists: ['library']
     }
@@ -110,6 +116,7 @@ export const SERVICE_DEFINITIONS: Record<ServiceId, ServiceDefinition> = {
     capabilities: {
       read: { ...FULL_SCOPES },
       write: { history: true, progress: true, library: false },
+      historyWriteMode: 'state',
       profiles: false,
       nativeLists: ['library']
     }
@@ -126,6 +133,7 @@ export const SERVICE_DEFINITIONS: Record<ServiceId, ServiceDefinition> = {
     capabilities: {
       read: { ...FULL_SCOPES },
       write: { ...FULL_SCOPES },
+      historyWriteMode: 'state',
       profiles: true,
       nativeLists: ['library']
     }
@@ -179,6 +187,7 @@ export interface ListProvenance extends RecordProvenance {
 export interface HistoryRecord {
   media: MediaRef
   watchedAt: number
+  eventId?: string | number
   playCount?: number
   source?: RecordProvenance
 }
@@ -596,6 +605,33 @@ function dedupeLatest<T extends { media: MediaRef }>(
     .map(([, entry]) => clone(entry.record))
 }
 
+function cloneHistory(records: readonly HistoryRecord[]): HistoryRecord[] {
+  return records
+    .map((record, index) => ({ record, index, time: normalizedTime(record.watchedAt) }))
+    .sort((left, right) => right.time - left.time || left.index - right.index)
+    .map(({ record }) => ({
+      ...record,
+      media: cloneMedia(record.media),
+      source: record.source ? { ...record.source } : undefined
+    }))
+}
+
+/**
+ * Reduces event history to the newest watched state per movie or episode.
+ * Only providers that cannot represent individual play events should use this.
+ */
+export function collapseHistoryToWatchedState(records: readonly HistoryRecord[]): HistoryRecord[] {
+  return dedupeLatest(
+    records,
+    record => record.watchedAt,
+    record => ({
+      ...record,
+      media: cloneMedia(record.media),
+      source: record.source ? { ...record.source } : undefined
+    })
+  )
+}
+
 function provenanceKey(provenance: ListProvenance): string {
   return [
     provenance.service,
@@ -661,15 +697,7 @@ function dedupeLibrary(records: readonly LibraryRecord[]): LibraryRecord[] {
 
 export function dedupeBundle(bundle: CanonicalBundle): CanonicalBundle {
   return {
-    history: dedupeLatest(
-      bundle.history,
-      record => record.watchedAt,
-      record => ({
-        ...record,
-        media: cloneMedia(record.media),
-        source: record.source ? { ...record.source } : undefined
-      })
-    ),
+    history: cloneHistory(bundle.history),
     progress: dedupeLatest(
       bundle.progress,
       record => record.updatedAt,

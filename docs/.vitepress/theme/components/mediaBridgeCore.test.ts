@@ -7,6 +7,7 @@ import {
   buildStremioVideoId,
   canonicalEpisodeKey,
   canonicalMediaKey,
+  collapseHistoryToWatchedState,
   createEmptyBundle,
   dedupeBundle,
   episodeAliasKeys,
@@ -54,6 +55,10 @@ test('defines six services and generates every directional pair', () => {
     assert.deepEqual(SERVICE_DEFINITIONS[service].capabilities.write, ['plex', 'jellyfin'].includes(service)
       ? { history: true, progress: true, library: false }
       : { history: true, progress: true, library: true })
+    assert.equal(
+      SERVICE_DEFINITIONS[service].capabilities.historyWriteMode,
+      service === 'trakt' ? 'events' : 'state'
+    )
   }
 
   assert.equal(ROUTE_PAIRS.filter(route => route.sameService).length, 6)
@@ -217,13 +222,13 @@ test('preserves external anime IDs without sharing nested references', () => {
   assert.notEqual(deduped.history[0].media.ids.external, media.ids.external)
 })
 
-test('dedupes deterministically with latest records and preserved list provenance', () => {
+test('preserves history events while deduping state records deterministically', () => {
   const bundle: CanonicalBundle = createEmptyBundle()
   const sharedMovie = movie({ imdb: 'tt100' }, 'Shared')
 
   bundle.history.push(
-    { media: sharedMovie, watchedAt: 100, playCount: 1 },
-    { media: sharedMovie, watchedAt: 200, playCount: 2 }
+    { media: sharedMovie, watchedAt: 100, eventId: 10, playCount: 1 },
+    { media: sharedMovie, watchedAt: 200, eventId: 11, playCount: 2 }
   )
   bundle.progress.push(
     { media: sharedMovie, positionMs: 10, durationMs: 100, updatedAt: 300 },
@@ -246,9 +251,13 @@ test('dedupes deterministically with latest records and preserved list provenanc
   )
 
   const deduped = dedupeBundle(bundle)
-  assert.equal(deduped.history.length, 1)
+  assert.equal(deduped.history.length, 2)
   assert.equal(deduped.history[0].watchedAt, 200)
-  assert.equal(deduped.history[0].playCount, 2)
+  assert.deepEqual(deduped.history.map(record => record.eventId), [11, 10])
+  const watchedState = collapseHistoryToWatchedState(deduped.history)
+  assert.equal(watchedState.length, 1)
+  assert.equal(watchedState[0].eventId, 11)
+  assert.equal(watchedState[0].playCount, 2)
   assert.equal(deduped.progress.length, 1)
   assert.equal(deduped.progress[0].positionMs, 80)
   assert.equal(deduped.library.length, 1)
