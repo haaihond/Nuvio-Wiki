@@ -1,4 +1,5 @@
 import {
+  collapseHistoryToWatchedState,
   createEmptyBundle,
   dedupeBundle,
   mediaAliasKeys,
@@ -598,8 +599,10 @@ async function traktGetAll(
 ): Promise<any[]> {
   const output: any[] = []
   const seenPageStarts = new Set<string>()
-  for (let page = 1; page <= 200; page++) {
-    const response = await traktRequest(connection, path, { ...params, page, limit: TRAKT_PAGE_SIZE })
+  let page = 1
+  let limit = TRAKT_PAGE_SIZE
+  while (true) {
+    const response = await traktRequest(connection, path, { ...params, page, limit })
     const rows = Array.isArray(response.data) ? response.data : []
     if (!rows.length) break
     // Some Trakt endpoints paginate without exposing their pagination headers
@@ -610,12 +613,13 @@ async function traktGetAll(
     if (seenPageStarts.has(pageStart)) break
     seenPageStarts.add(pageStart)
     output.push(...rows)
-    const pages = Number(
-      response.headers.get('x-pagination-page-count')
-      || response.headers.get('X-Pagination-Page-Count')
-      || 0
-    )
-    if (pages && page >= pages) break
+    const responsePage = Number(response.headers.get('x-pagination-page'))
+    const pageCount = Number(response.headers.get('x-pagination-page-count'))
+    const responseLimit = Number(response.headers.get('x-pagination-limit'))
+    const currentPage = Number.isInteger(responsePage) && responsePage > 0 ? responsePage : page
+    if (Number.isInteger(responseLimit) && responseLimit > 0) limit = responseLimit
+    if (Number.isInteger(pageCount) && pageCount > 0 && currentPage >= pageCount) break
+    page = currentPage >= page ? currentPage + 1 : page + 1
   }
   return output
 }
@@ -1612,7 +1616,7 @@ async function pushPlex(options: PushOptions): Promise<PushResult> {
   const confirmedScopes: BridgeScope[] = []
 
   if (scopes.history) {
-    for (const record of bundle.history) {
+    for (const record of collapseHistoryToWatchedState(bundle.history)) {
       const resolved = resolvePlexEntry(record.media, catalog, 'history')
       if (!resolved.entry) {
         skipped.history++
@@ -2041,7 +2045,7 @@ async function pushJellyfin(options: PushOptions): Promise<PushResult> {
   const confirmedScopes: BridgeScope[] = []
 
   if (scopes.history) {
-    for (const record of bundle.history) {
+    for (const record of collapseHistoryToWatchedState(bundle.history)) {
       const resolved = resolveJellyfinEntry(record.media, catalog, 'history')
       if (!resolved.entry) {
         skipped.history++
@@ -2171,6 +2175,7 @@ async function pullTrakt(options: PullOptions): Promise<PullResult> {
         bundle.history.push({
           media: mediaFromTrakt(item.movie, 'movie'),
           watchedAt: asEpochMs(item.watched_at),
+          eventId: typeof item.id === 'string' || typeof item.id === 'number' ? item.id : undefined,
           playCount: 1,
           source: provenance
         })
@@ -2192,6 +2197,7 @@ async function pullTrakt(options: PullOptions): Promise<PullResult> {
             episodeTitle: item.episode.title
           },
           watchedAt: asEpochMs(item.watched_at),
+          eventId: typeof item.id === 'string' || typeof item.id === 'number' ? item.id : undefined,
           playCount: 1,
           source: provenance
         })
@@ -2759,7 +2765,7 @@ async function pushNuvio(options: PushOptions): Promise<PushResult> {
 
   if (scopes.history && bundle.history.length) {
     const rows: any[] = []
-    for (const record of bundle.history) {
+    for (const record of collapseHistoryToWatchedState(bundle.history)) {
       const contentId = nuvioContentId(record.media)
       if (!contentId) {
         issues.push({ scope: 'history', status: 'unresolved', media: record.media, reason: 'Nuvio needs a supported content ID.' })
@@ -3193,7 +3199,7 @@ async function pushSimkl(options: PushOptions): Promise<PushResult> {
   const confirmedScopes: BridgeScope[] = []
 
   if (scopes.history && bundle.history.length) {
-    const grouped = groupSimklHistory(bundle.history)
+    const grouped = groupSimklHistory(collapseHistoryToWatchedState(bundle.history))
     issues.push(...grouped.issues)
     if (grouped.issues.length) skipped.history = grouped.issues.length
     const payloads = [
@@ -3613,7 +3619,9 @@ async function pushStremio(options: PushOptions): Promise<PushResult> {
     if (!byId.has(id)) byId.set(id, { history: [], progress: [], library: [], media: record.media })
     ;(byId.get(id)![scope] as any[]).push(record)
   }
-  if (scopes.history) bundle.history.forEach(record => addRecord('history', record))
+  if (scopes.history) {
+    collapseHistoryToWatchedState(bundle.history).forEach(record => addRecord('history', record))
+  }
   if (scopes.progress) {
     bundle.progress.forEach(record => {
       if (!absoluteProgress(record)) {

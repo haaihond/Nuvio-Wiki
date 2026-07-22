@@ -1,6 +1,8 @@
 import {
+  SERVICE_DEFINITIONS,
   canonicalEpisodeKey,
   canonicalMediaKey,
+  collapseHistoryToWatchedState,
   dedupeBundle,
   episodeAliasKeys,
   mediaAliasKeys,
@@ -14,6 +16,7 @@ import {
   type MediaIds,
   type MediaRef,
   type ProgressRecord,
+  type ServiceId,
   type SyncScopes
 } from './mediaBridgeCore.ts'
 
@@ -66,6 +69,7 @@ export interface MediaBridgePlanInput {
   source: CanonicalBundle
   destination: CanonicalBundle
   scopes: SyncScopes
+  destinationService?: ServiceId
   mappingIssues?: readonly ProviderMappingIssue[]
 }
 
@@ -329,10 +333,6 @@ function classifyRecord(
   if (scope === 'history') {
     const sourceHistory = source as HistoryRecord
     const destinationHistory = destination as HistoryRecord
-    // The bridge intentionally collapses replay events to the latest watched
-    // state. Some destinations (notably Trakt) create a fresh history event on
-    // every write, so comparing provider play counts here would make an
-    // otherwise-idempotent route add another play on every run.
     return sourceHistory.watchedAt > destinationHistory.watchedAt
       ? 'update'
       : 'already-present'
@@ -359,18 +359,20 @@ function recordsForScope(bundle: CanonicalBundle, scope: BridgeScope): ScopedRec
   return bundle.library
 }
 
-function destinationIndexes(bundle: CanonicalBundle): Record<BridgeScope, Map<string, ScopedRecord>> {
+type DestinationIndex = Map<string, ScopedRecord[]>
+
+function destinationIndexes(bundle: CanonicalBundle): Record<BridgeScope, DestinationIndex> {
   const result = {
-    history: new Map<string, ScopedRecord>(),
-    progress: new Map<string, ScopedRecord>(),
-    library: new Map<string, ScopedRecord>()
+    history: new Map<string, ScopedRecord[]>(),
+    progress: new Map<string, ScopedRecord[]>(),
+    library: new Map<string, ScopedRecord[]>()
   }
   for (const scope of Object.keys(result) as BridgeScope[]) {
     for (const record of recordsForScope(bundle, scope)) {
       for (const key of recordComparisonKeys(record.media, scope === 'progress')) {
-        // dedupeBundle orders latest records first; retain that winner if two
-        // records expose the same alias through different primary IDs.
-        if (!result[scope].has(key)) result[scope].set(key, record)
+        const records = result[scope].get(key) || []
+        records.push(record)
+        result[scope].set(key, records)
       }
     }
   }
@@ -378,13 +380,33 @@ function destinationIndexes(bundle: CanonicalBundle): Record<BridgeScope, Map<st
 }
 
 function findDestinationRecord(
-  index: Map<string, ScopedRecord>,
+  index: DestinationIndex,
   media: MediaRef,
   scope: BridgeScope
 ): ScopedRecord | undefined {
   for (const key of recordComparisonKeys(media, scope === 'progress')) {
-    const record = index.get(key)
+    const record = index.get(key)?.[0]
     if (record) return record
+  }
+  return undefined
+}
+
+function findDestinationHistoryEvent(
+  index: DestinationIndex,
+  media: MediaRef,
+  watchedAt: number,
+  consumed: Set<ScopedRecord>
+): HistoryRecord | undefined {
+  const candidates = new Set<ScopedRecord>()
+  for (const key of recordComparisonKeys(media)) {
+    for (const candidate of index.get(key) || []) candidates.add(candidate)
+  }
+  for (const candidate of candidates) {
+    if (consumed.has(candidate)) continue
+    const history = candidate as HistoryRecord
+    if (history.watchedAt !== watchedAt) continue
+    consumed.add(candidate)
+    return history
   }
   return undefined
 }
@@ -434,9 +456,17 @@ function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
 }
 
 export function planMediaBridgePreview(input: MediaBridgePlanInput): MediaBridgePreviewPlan {
+  const historyWriteMode = input.destinationService
+    ? SERVICE_DEFINITIONS[input.destinationService].capabilities.historyWriteMode
+    : 'state'
   const source = dedupeBundle(input.source)
   const destination = dedupeBundle(input.destination)
+  if (historyWriteMode === 'state') {
+    source.history = collapseHistoryToWatchedState(source.history)
+    destination.history = collapseHistoryToWatchedState(destination.history)
+  }
   const destinationByScope = destinationIndexes(destination)
+  const consumedHistoryEvents = new Set<ScopedRecord>()
   const mappingIssues = buildMappingIssueIndex(input.mappingIssues || [])
   const transfer: CanonicalBundle = { history: [], progress: [], library: [] }
   const rows: PendingRow[] = []
@@ -510,7 +540,14 @@ export function planMediaBridgePreview(input: MediaBridgePlanInput): MediaBridge
       }
 
       const plannedRecord = cloneRecordWithMedia(scope, sourceRecord, mappedMedia)
-      const destinationRecord = findDestinationRecord(destinationByScope[scope], mappedMedia, scope)
+      const destinationRecord = scope === 'history' && historyWriteMode === 'events'
+        ? findDestinationHistoryEvent(
+            destinationByScope.history,
+            mappedMedia,
+            (plannedRecord as HistoryRecord).watchedAt,
+            consumedHistoryEvents
+          )
+        : findDestinationRecord(destinationByScope[scope], mappedMedia, scope)
       const outcome = classifyRecord(scope, plannedRecord, destinationRecord)
       stats[outcome === 'already-present' ? 'alreadyPresent' : outcome]++
       if (remapped) stats.remapped++

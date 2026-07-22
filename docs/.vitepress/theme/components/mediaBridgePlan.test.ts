@@ -112,11 +112,41 @@ test('keeps collapsed history idempotent when only provider replay counts differ
   source.history.push({ media: movie('tt104', 'Replay'), watchedAt: 100, playCount: 8 })
   destination.history.push({ media: movie('tt104', 'Replay'), watchedAt: 100, playCount: 1 })
 
-  const plan = planMediaBridgePreview({ source, destination, scopes: ALL_SCOPES })
+  const plan = planMediaBridgePreview({ source, destination, destinationService: 'simkl', scopes: ALL_SCOPES })
 
   assert.equal(plan.stats.alreadyPresent, 1)
   assert.equal(plan.stats.update, 0)
   assert.equal(plan.transfer.history.length, 0)
+})
+
+test('preserves replay events for Trakt and matches them as a timestamped multiset', () => {
+  const source = createEmptyBundle()
+  const destination = createEmptyBundle()
+  const replay = movie('tt105', 'Replay events')
+  source.history.push(
+    { media: replay, watchedAt: 100, eventId: 1001 },
+    { media: replay, watchedAt: 200, eventId: 1002 },
+    { media: replay, watchedAt: 200, eventId: 1003 }
+  )
+  destination.history.push(
+    { media: replay, watchedAt: 100, eventId: 2001 },
+    { media: replay, watchedAt: 200, eventId: 2002 }
+  )
+
+  const plan = planMediaBridgePreview({
+    source,
+    destination,
+    destinationService: 'trakt',
+    scopes: ALL_SCOPES
+  })
+
+  assert.equal(plan.stats.source, 3)
+  assert.equal(plan.stats.add, 1)
+  assert.equal(plan.stats.update, 0)
+  assert.equal(plan.stats.alreadyPresent, 2)
+  assert.equal(plan.transfer.history.length, 1)
+  assert.equal(plan.transfer.history[0].eventId, 1003)
+  assert.equal(plan.transfer.history[0].watchedAt, 200)
 })
 
 test('matches history, progress, and library through shared secondary IDs', () => {

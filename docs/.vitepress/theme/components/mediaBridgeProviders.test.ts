@@ -387,6 +387,36 @@ test('confirms nested Trakt episode history counts from the sync response', asyn
   assert.deepEqual(result.issues, [])
 })
 
+test('submits every replay timestamp to Trakt as an individual history event', async t => {
+  const watchedAt = [
+    Date.UTC(2026, 6, 15),
+    Date.UTC(2026, 6, 16),
+    Date.UTC(2026, 6, 17)
+  ]
+  t.mock.method(globalThis, 'fetch', async (_input, init) => {
+    const body = JSON.parse(String(init?.body || '{}'))
+    assert.equal(body.movies.length, 3)
+    assert.deepEqual(body.movies.map((movie: any) => movie.watched_at), watchedAt.map(value => new Date(value).toISOString()))
+    return Response.json({
+      added: { movies: 3, episodes: 0 },
+      updated: { movies: 0, episodes: 0 },
+      not_found: { movies: [], shows: [], seasons: [], episodes: [] }
+    })
+  })
+  const bundle = createEmptyBundle()
+  bundle.history.push(...watchedAt.map(value => movieHistory('Replay', 'tt2015381', value)))
+
+  const result = await pushMediaBridge({
+    connection: traktConnection(),
+    bundle,
+    scopes: { history: true, progress: false, library: false }
+  })
+
+  assert.equal(result.written.history, 3)
+  assert.deepEqual(result.confirmedScopes, ['history'])
+  assert.deepEqual(result.issues, [])
+})
+
 test('falls back to destination verification for an incomplete Trakt history response', async t => {
   t.mock.method(globalThis, 'fetch', async () => Response.json({ success: true }))
   const bundle = createEmptyBundle()
@@ -403,7 +433,7 @@ test('falls back to destination verification for an incomplete Trakt history res
   assert.deepEqual(result.issues, [])
 })
 
-test('deduplicates Trakt replay history to the latest watched state', async t => {
+test('preserves Trakt replay history events and their IDs', async t => {
   t.mock.method(globalThis, 'fetch', async input => {
     const url = new URL(String(input))
     if (url.pathname !== '/users/me/history') throw new Error(`Unexpected request: ${url.pathname}`)
@@ -436,10 +466,11 @@ test('deduplicates Trakt replay history to the latest watched state', async t =>
   const source = await pullMediaBridge({ connection: traktConnection('source'), scopes })
   const destination = await pullMediaBridge({ connection: traktConnection('destination'), scopes })
 
-  assert.equal(source.bundle.history.length, 1)
+  assert.equal(source.bundle.history.length, 2)
   assert.equal(source.bundle.history[0].watchedAt, Date.parse('2026-07-17T12:00:00Z'))
+  assert.deepEqual(source.bundle.history.map(record => record.eventId), [2, 1])
   assert.deepEqual(source.issues, [])
-  assert.equal(destination.bundle.history.length, 1)
+  assert.equal(destination.bundle.history.length, 2)
   assert.deepEqual(destination.issues, [])
 })
 
@@ -523,6 +554,100 @@ test('reads every Trakt history page and maps episodes through their parent show
     '/users/me/history:1',
     '/users/me/history:2',
     '/users/me/history:3'
+  ])
+})
+
+test('exports all 4,000 paginated Trakt history events with event IDs and replay timestamps', async t => {
+  const totalEvents = 4_000
+  const serverLimit = 80
+  const pageCount = totalEvents / serverLimit
+  const requestedLimits: number[] = []
+  const fetchMock = t.mock.method(globalThis, 'fetch', async input => {
+    const url = new URL(String(input))
+    assert.equal(url.pathname, '/users/me/history')
+    const page = Number(url.searchParams.get('page'))
+    requestedLimits.push(Number(url.searchParams.get('limit')))
+    const firstIndex = (page - 1) * serverLimit
+    const rows = Array.from({ length: serverLimit }, (_, offset) => {
+      const index = firstIndex + offset
+      const watchedAt = new Date(Date.UTC(2020, 0, 1) + index * 1_000).toISOString()
+      return index % 2 === 0
+        ? {
+            id: index + 1,
+            watched_at: watchedAt,
+            action: 'watch',
+            type: 'movie',
+            movie: {
+              title: 'Repeated Movie',
+              year: 2020,
+              ids: { trakt: 1, imdb: 'tt0000001' }
+            }
+          }
+        : {
+            id: index + 1,
+            watched_at: watchedAt,
+            action: 'watch',
+            type: 'episode',
+            episode: { season: 1, number: 1, title: 'Pilot', ids: { trakt: 2 } },
+            show: {
+              title: 'Repeated Show',
+              year: 2020,
+              ids: { trakt: 3, imdb: 'tt0000003' }
+            }
+          }
+    })
+    return Response.json(rows, {
+      headers: {
+        'X-Pagination-Page': String(page),
+        'X-Pagination-Limit': String(serverLimit),
+        'X-Pagination-Page-Count': String(pageCount),
+        'X-Pagination-Item-Count': String(totalEvents)
+      }
+    })
+  })
+
+  const result = await pullMediaBridge({
+    connection: traktConnection('source'),
+    scopes: { history: true, progress: false, library: false }
+  })
+
+  assert.equal(fetchMock.mock.callCount(), pageCount)
+  assert.equal(requestedLimits[0], 100)
+  assert.ok(requestedLimits.slice(1).every(limit => limit === serverLimit))
+  assert.equal(result.bundle.history.length, totalEvents)
+  assert.equal(result.bundle.history[0].eventId, totalEvents)
+  assert.equal(result.bundle.history.at(-1)?.eventId, 1)
+  assert.equal(result.bundle.history.filter(record => record.media.kind === 'movie').length, 2_000)
+  assert.equal(result.bundle.history.filter(record => record.media.kind === 'series').length, 2_000)
+  assert.deepEqual(result.issues, [])
+})
+
+test('continues Trakt pagination to an empty page when pagination headers are unavailable', async t => {
+  const events = Array.from({ length: 5 }, (_, index) => ({
+    id: `event-${index + 1}`,
+    watched_at: new Date(Date.UTC(2026, 6, 17, index)).toISOString(),
+    type: 'movie',
+    movie: {
+      title: 'Server Limited',
+      year: 2026,
+      ids: { trakt: 10, imdb: 'tt0000010' }
+    }
+  }))
+  const fetchMock = t.mock.method(globalThis, 'fetch', async input => {
+    const url = new URL(String(input))
+    const page = Number(url.searchParams.get('page'))
+    return Response.json(events.slice((page - 1) * 2, page * 2))
+  })
+
+  const result = await pullMediaBridge({
+    connection: traktConnection('source'),
+    scopes: { history: true, progress: false, library: false }
+  })
+
+  assert.equal(fetchMock.mock.callCount(), 4)
+  assert.equal(result.bundle.history.length, 5)
+  assert.deepEqual(result.bundle.history.map(record => record.eventId), [
+    'event-5', 'event-4', 'event-3', 'event-2', 'event-1'
   ])
 })
 
@@ -1275,7 +1400,7 @@ test('treats a successful Stremio saved-title batch as confirmed', async t => {
   assert.deepEqual(result.issues, [])
 })
 
-test('treats an accepted Simkl history no-op as confirmed without requiring a newer timestamp', async t => {
+test('collapses replay events for Simkl watched state and confirms an accepted no-op', async t => {
   let requestBody: any = null
   const fetchMock = t.mock.method(globalThis, 'fetch', async (input, init) => {
     assert.equal(new URL(String(input)).pathname, '/sync/history')
@@ -1297,7 +1422,10 @@ test('treats an accepted Simkl history no-op as confirmed without requiring a ne
     })
   })
   const bundle = createEmptyBundle()
-  bundle.history.push(movieHistory('Already Watched', 'tt2015381', Date.UTC(2026, 6, 17)))
+  bundle.history.push(
+    movieHistory('Already Watched', 'tt2015381', Date.UTC(2026, 6, 16)),
+    movieHistory('Already Watched', 'tt2015381', Date.UTC(2026, 6, 17))
+  )
 
   const result = await pushMediaBridge({
     connection: simklConnection(),
@@ -1306,6 +1434,8 @@ test('treats an accepted Simkl history no-op as confirmed without requiring a ne
   })
 
   assert.equal(fetchMock.mock.callCount(), 1)
+  assert.equal(requestBody.movies.length, 1)
+  assert.equal(requestBody.movies[0].watched_at, '2026-07-17T00:00:00.000Z')
   assert.equal(result.written.history, 1)
   assert.equal(result.skipped?.history, undefined)
   assert.deepEqual(result.confirmedScopes, ['history'])
