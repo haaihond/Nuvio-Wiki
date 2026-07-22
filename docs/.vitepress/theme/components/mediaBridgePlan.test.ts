@@ -177,6 +177,51 @@ test('matches history, progress, and library through shared secondary IDs', () =
   assert.equal(plan.transfer.library.length, 0)
 })
 
+test('only updates Continue Watching state across provider ID differences and preserves destination media', () => {
+  const source = createEmptyBundle()
+  const destination = createEmptyBundle()
+
+  source.progress.push(
+    {
+      media: { kind: 'movie', ids: { tmdb: 8101 }, title: 'Same CW item', year: 2024 },
+      positionMs: 50_000,
+      durationMs: 100_000,
+      updatedAt: 500
+    },
+    {
+      media: { kind: 'movie', ids: { imdb: 'tt8102' }, title: 'Changed CW item', year: 2024 },
+      positionMs: 80_000,
+      durationMs: 100_000,
+      updatedAt: 500
+    }
+  )
+  destination.progress.push(
+    {
+      media: { kind: 'movie', ids: { trakt: 9101 }, title: 'Same CW item', year: 2024 },
+      positionMs: 50_500,
+      durationMs: 100_000,
+      updatedAt: 400
+    },
+    {
+      media: { kind: 'movie', ids: { tmdb: 9102 }, title: 'Changed CW item', year: 2024 },
+      positionMs: 20_000,
+      durationMs: 100_000,
+      updatedAt: 400
+    }
+  )
+
+  const plan = planMediaBridgePreview({ source, destination, scopes: ALL_SCOPES })
+
+  assert.equal(plan.stats.add, 0)
+  assert.equal(plan.stats.alreadyPresent, 1)
+  assert.equal(plan.stats.update, 1)
+  assert.equal(plan.transfer.progress.length, 1)
+  assert.deepEqual(plan.transfer.progress[0].media.ids, { tmdb: 9102 })
+  assert.equal(plan.transfer.progress[0].positionMs, 80_000)
+  assert.deepEqual(source.progress[1].media.ids, { imdb: 'tt8102' })
+  assert.deepEqual(destination.progress[1].media.ids, { tmdb: 9102 })
+})
+
 test('upgrades an existing Nuvio IMDb library identity when the source has TMDB', () => {
   const source = createEmptyBundle()
   const destination = createEmptyBundle()

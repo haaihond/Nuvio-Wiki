@@ -91,6 +91,33 @@ function recordAliasKeys(media: MediaRef): string[] {
   return episodeAliases.length ? episodeAliases : mediaAliasKeys(media)
 }
 
+function titleYearRecordKeys(media: MediaRef): string[] {
+  const title = normalizeTitle(media.title)
+  const year = Number(media.year)
+  if (!title || !Number.isInteger(year) || year <= 0) return []
+
+  const base = `${media.kind}:title:${title.replace(/\s+/g, '-')}:${year}`
+  if (media.kind !== 'series') return [base]
+
+  const keys: string[] = []
+  if (Number.isInteger(media.season) && Number(media.season) >= 0
+    && Number.isInteger(media.episode) && Number(media.episode) > 0) {
+    keys.push(`${base}:season:${media.season}:episode:${media.episode}`)
+  }
+  if (Number.isInteger(media.absoluteEpisode) && Number(media.absoluteEpisode) > 0) {
+    keys.push(`${base}:absolute:${media.absoluteEpisode}`)
+  }
+  return keys
+}
+
+function recordComparisonKeys(media: MediaRef, includeTitleYear = false): string[] {
+  // Provider IDs describe the same title in different namespaces. Keep them as
+  // the strongest match. Continue Watching may also use title/year (plus
+  // episode coordinates) because providers do not always share an external ID.
+  const semanticKeys = includeTitleYear ? titleYearRecordKeys(media) : []
+  return [...new Set([...recordAliasKeys(media), ...semanticKeys])]
+}
+
 function mediaLocator(media: MediaRef): string {
   return canonicalRecordKey(media) || [
     'unresolved',
@@ -340,7 +367,7 @@ function destinationIndexes(bundle: CanonicalBundle): Record<BridgeScope, Map<st
   }
   for (const scope of Object.keys(result) as BridgeScope[]) {
     for (const record of recordsForScope(bundle, scope)) {
-      for (const key of recordAliasKeys(record.media)) {
+      for (const key of recordComparisonKeys(record.media, scope === 'progress')) {
         // dedupeBundle orders latest records first; retain that winner if two
         // records expose the same alias through different primary IDs.
         if (!result[scope].has(key)) result[scope].set(key, record)
@@ -348,6 +375,18 @@ function destinationIndexes(bundle: CanonicalBundle): Record<BridgeScope, Map<st
     }
   }
   return result
+}
+
+function findDestinationRecord(
+  index: Map<string, ScopedRecord>,
+  media: MediaRef,
+  scope: BridgeScope
+): ScopedRecord | undefined {
+  for (const key of recordComparisonKeys(media, scope === 'progress')) {
+    const record = index.get(key)
+    if (record) return record
+  }
+  return undefined
 }
 
 function pushTransferRecord(bundle: CanonicalBundle, scope: BridgeScope, record: ScopedRecord): void {
@@ -471,11 +510,18 @@ export function planMediaBridgePreview(input: MediaBridgePlanInput): MediaBridge
       }
 
       const plannedRecord = cloneRecordWithMedia(scope, sourceRecord, mappedMedia)
-      const outcome = classifyRecord(scope, plannedRecord, destinationByScope[scope].get(targetKey))
+      const destinationRecord = findDestinationRecord(destinationByScope[scope], mappedMedia, scope)
+      const outcome = classifyRecord(scope, plannedRecord, destinationRecord)
       stats[outcome === 'already-present' ? 'alreadyPresent' : outcome]++
       if (remapped) stats.remapped++
       if (outcome === 'add' || outcome === 'update') {
-        pushTransferRecord(transfer, scope, plannedRecord)
+        // A Continue Watching update changes playback state only. Preserve the
+        // destination provider's established ID and metadata instead of
+        // replacing them with the source provider's representation.
+        const transferRecord = scope === 'progress' && outcome === 'update' && destinationRecord
+          ? cloneRecordWithMedia(scope, plannedRecord, destinationRecord.media)
+          : plannedRecord
+        pushTransferRecord(transfer, scope, transferRecord)
       }
 
       rows.push({
