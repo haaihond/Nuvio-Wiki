@@ -1327,7 +1327,11 @@ async function fetchCinemeta(type, imdbId, signal) {
   const meta = data?.meta;
   return {
     posterUrl: meta?.poster || null,
+    backgroundUrl: meta?.background || null,
+    description: meta?.description || null,
     releaseDate: meta?.released || null,
+    imdbRating: Number.isFinite(Number(meta?.imdbRating)) ? Number(meta.imdbRating) : null,
+    genres: Array.isArray(meta?.genres) ? meta.genres : [],
     source: 'cinemeta'
   };
 }
@@ -1358,9 +1362,19 @@ async function resolveMetadata(item, { signal }) {
           posterUrl: detail?.poster_path
             ? `https://image.tmdb.org/t/p/w500${detail.poster_path}`
             : null,
+          backgroundUrl: detail?.backdrop_path
+            ? `https://image.tmdb.org/t/p/original${detail.backdrop_path}`
+            : null,
+          description: detail?.overview || null,
           releaseDate: item.type === 'movie'
             ? detail?.release_date || null
             : detail?.first_air_date || null,
+          imdbRating: Number.isFinite(Number(detail?.vote_average))
+            ? Number(detail.vote_average)
+            : null,
+          genres: Array.isArray(detail?.genres)
+            ? detail.genres.map(genre => genre?.name).filter(Boolean)
+            : [],
           source: 'tmdb',
           resolvedTmdbId
         };
@@ -1381,7 +1395,11 @@ async function resolveMetadata(item, { signal }) {
 
   return {
     posterUrl: null,
+    backgroundUrl: null,
+    description: null,
     releaseDate: null,
+    imdbRating: null,
+    genres: [],
     source: 'failed',
     resolvedTmdbId,
     cacheable: !sawTransientFailure && !signal?.aborted,

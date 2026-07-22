@@ -57,6 +57,7 @@ export function createMetadataCache({
       cache_key TEXT PRIMARY KEY,
       poster_url TEXT,
       release_date TEXT,
+      metadata_json TEXT,
       source TEXT NOT NULL,
       updated_at INTEGER NOT NULL,
       expires_at INTEGER NOT NULL
@@ -71,6 +72,14 @@ export function createMetadataCache({
     ) WITHOUT ROWID;
   `);
 
+  const cacheColumns = db.prepare('PRAGMA table_info(metadata_cache)').all();
+  if (!cacheColumns.some(column => column.name === 'metadata_json')) {
+    db.exec('ALTER TABLE metadata_cache ADD COLUMN metadata_json TEXT');
+    // Older entries contain only poster and release date. Refetch them so a
+    // library import never receives a silently partial metadata record.
+    db.exec('DELETE FROM metadata_cache');
+  }
+
   const selectStatements = new Map();
   const selectCount = db.prepare('SELECT COUNT(*) AS count FROM metadata_cache');
   const deleteExpired = db.prepare('DELETE FROM metadata_cache WHERE expires_at <= ?');
@@ -82,13 +91,14 @@ export function createMetadataCache({
   `);
   const upsert = db.prepare(`
     INSERT INTO metadata_cache (
-      cache_key, poster_url, release_date, source, updated_at, expires_at
+      cache_key, poster_url, release_date, metadata_json, source, updated_at, expires_at
     ) VALUES (
-      @cacheKey, @posterUrl, @releaseDate, @source, @updatedAt, @expiresAt
+      @cacheKey, @posterUrl, @releaseDate, @metadataJson, @source, @updatedAt, @expiresAt
     )
     ON CONFLICT(cache_key) DO UPDATE SET
       poster_url = excluded.poster_url,
       release_date = excluded.release_date,
+      metadata_json = excluded.metadata_json,
       source = excluded.source,
       updated_at = excluded.updated_at,
       expires_at = excluded.expires_at
@@ -117,6 +127,12 @@ export function createMetadataCache({
         cacheKey,
         posterUrl: typeof value.posterUrl === 'string' ? value.posterUrl : null,
         releaseDate: typeof value.releaseDate === 'string' ? value.releaseDate : null,
+        metadataJson: JSON.stringify({
+          ...(typeof value.backgroundUrl === 'string' ? { backgroundUrl: value.backgroundUrl } : {}),
+          ...(typeof value.description === 'string' ? { description: value.description } : {}),
+          ...(Number.isFinite(value.imdbRating) ? { imdbRating: value.imdbRating } : {}),
+          ...(Array.isArray(value.genres) ? { genres: value.genres } : {})
+        }),
         source,
         updatedAt,
         expiresAt: updatedAt + ttl
@@ -142,7 +158,7 @@ export function createMetadataCache({
       if (!statement) {
         const placeholders = Array.from({ length: chunk.length }, () => '?').join(',');
         statement = db.prepare(`
-          SELECT cache_key, poster_url, release_date, source, updated_at
+          SELECT cache_key, poster_url, release_date, metadata_json, source, updated_at
           FROM metadata_cache
           WHERE expires_at > ? AND cache_key IN (${placeholders})
         `);
@@ -150,9 +166,15 @@ export function createMetadataCache({
       }
 
       for (const row of statement.all(timestamp, ...chunk)) {
+        let metadata = {};
+        try {
+          const parsed = JSON.parse(row.metadata_json || '{}');
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) metadata = parsed;
+        } catch {}
         values.set(row.cache_key, {
           posterUrl: row.poster_url,
           releaseDate: row.release_date,
+          ...metadata,
           source: row.source,
           updatedAt: row.updated_at
         });

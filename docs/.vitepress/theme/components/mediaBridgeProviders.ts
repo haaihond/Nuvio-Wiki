@@ -2146,51 +2146,48 @@ async function pullTrakt(options: PullOptions): Promise<PullResult> {
   const provenance = sourceOf(connection)
 
   if (scopes.history) {
-    logTo(log, 'Reading Trakt watched movies and episodes...')
-    let omittedPlayEvents = 0
-    const [movies, shows] = await Promise.all([
-      traktGetAll(connection, '/sync/watched/movies', { extended: 'full' }),
-      traktGetAll(connection, '/sync/watched/shows', { extended: 'full' })
-    ])
-    for (const item of movies) {
-      const media = mediaFromTrakt(item.movie, 'movie')
-      const playCount = positiveNumber(item.plays, 1)
-      omittedPlayEvents += Math.max(0, Math.floor(playCount) - 1)
-      bundle.history.push({
-        media,
-        watchedAt: asEpochMs(item.last_watched_at || item.watched_at),
-        playCount,
-        source: provenance
-      })
-    }
-    for (const item of shows) {
-      const show = mediaFromTrakt(item.show, 'series')
-      for (const season of item.seasons || []) {
-        for (const episode of season.episodes || []) {
-          const playCount = positiveNumber(episode.plays, 1)
-          omittedPlayEvents += Math.max(0, Math.floor(playCount) - 1)
-          bundle.history.push({
-            media: {
-              ...show,
-              season: Number(season.number),
-              episode: Number(episode.number),
-              episodeTitle: episode.title
-            },
-            watchedAt: asEpochMs(episode.last_watched_at || item.last_watched_at),
-            playCount,
-            source: provenance
-          })
-        }
+    logTo(log, 'Reading Trakt paginated movie and episode history...')
+    const rows = await traktGetAll(connection, '/users/me/history', { extended: 'full' })
+    let invalidRows = 0
+    for (const item of rows) {
+      if ((item.type === 'movie' || item.movie) && item.movie) {
+        bundle.history.push({
+          media: mediaFromTrakt(item.movie, 'movie'),
+          watchedAt: asEpochMs(item.watched_at),
+          playCount: 1,
+          source: provenance
+        })
+        continue
       }
+
+      if ((item.type === 'episode' || item.episode) && item.episode && item.show) {
+        const season = Number(item.episode.season)
+        const episode = Number(item.episode.number)
+        if (!Number.isInteger(season) || season < 0 || !Number.isInteger(episode) || episode < 1) {
+          invalidRows++
+          continue
+        }
+        bundle.history.push({
+          media: {
+            ...mediaFromTrakt(item.show, 'series'),
+            season,
+            episode,
+            episodeTitle: item.episode.title
+          },
+          watchedAt: asEpochMs(item.watched_at),
+          playCount: 1,
+          source: provenance
+        })
+        continue
+      }
+
+      invalidRows++
     }
-    // This is a source-fidelity warning. A destination/verification read only
-    // needs the latest watched state, so surfacing it there creates duplicate
-    // and misleading warnings before and after a Trakt write.
-    if (omittedPlayEvents && connection.slot === 'source') {
+    if (invalidRows) {
       issues.push({
         scope: 'history',
         status: 'warning',
-        reason: `Trakt exposes only the latest timestamp for each watched title or episode; ${omittedPlayEvents} earlier play event${omittedPlayEvents === 1 ? '' : 's'} cannot be transferred.`
+        reason: `Skipped ${invalidRows} Trakt history row${invalidRows === 1 ? '' : 's'} that did not include a movie or a parent show with valid episode coordinates.`
       })
     }
   }
@@ -2631,7 +2628,11 @@ interface NuvioLibraryImport {
 interface NuvioMetadataResult {
   content_id: string | number
   posterUrl?: string | null
+  backgroundUrl?: string | null
+  description?: string | null
   releaseDate?: string | null
+  imdbRating?: number | null
+  genres?: string[]
   retryable?: boolean
 }
 
@@ -2709,7 +2710,11 @@ async function enrichNuvioLibraryImports(
       entry.item.poster = metadata.posterUrl
       entry.item.poster_shape = 'POSTER'
     }
+    if (metadata?.backgroundUrl) entry.item.background = metadata.backgroundUrl
+    if (metadata?.description) entry.item.description = metadata.description
     if (metadata?.releaseDate) entry.item.release_info = metadata.releaseDate
+    if (Number.isFinite(metadata?.imdbRating)) entry.item.imdb_rating = metadata.imdbRating
+    if (Array.isArray(metadata?.genres) && metadata.genres.length) entry.item.genres = metadata.genres
   }
 }
 
@@ -2750,7 +2755,9 @@ async function pushNuvio(options: PushOptions): Promise<PushResult> {
       rows.push({
         content_id: contentId,
         content_type: record.media.kind === 'movie' ? 'movie' : 'series',
-        title: record.media.title || mediaLabel(record.media),
+        title: record.media.kind === 'series'
+          ? mediaLabel(record.media)
+          : record.media.title || mediaLabel(record.media),
         ...(record.media.kind === 'series' ? { season: record.media.season, episode: record.media.episode } : {}),
         watched_at: record.watchedAt
       })

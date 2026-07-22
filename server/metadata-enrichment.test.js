@@ -63,7 +63,11 @@ test('deduplicates repeated IDs and writes all aliases in one batch', async () =
       fetches++;
       return {
         posterUrl: 'poster',
+        backgroundUrl: 'background',
+        description: 'Description',
         releaseDate: '2020-01-01',
+        imdbRating: 8.4,
+        genres: ['Drama'],
         source: 'tmdb',
         resolvedTmdbId: item.tmdbId
       };
@@ -80,6 +84,10 @@ test('deduplicates repeated IDs and writes all aliases in one batch', async () =
   assert.equal(fetches, 1);
   assert.equal(output.results.length, 100);
   assert.equal(output.summary.uniqueFetches, 1);
+  assert.equal(output.results[0].backgroundUrl, 'background');
+  assert.equal(output.results[0].description, 'Description');
+  assert.equal(output.results[0].imdbRating, 8.4);
+  assert.deepEqual(output.results[0].genres, ['Drama']);
   assert.equal(cache.values.has('movie:tmdb:99'), true);
   assert.equal(cache.values.has('movie:imdb:tt0000099'), true);
 });

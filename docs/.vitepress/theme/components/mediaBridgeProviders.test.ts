@@ -321,34 +321,47 @@ test('falls back to destination verification for an incomplete Trakt history res
   assert.deepEqual(result.issues, [])
 })
 
-test('only reports omitted Trakt replay timestamps when Trakt is the source', async t => {
+test('deduplicates Trakt replay history to the latest watched state', async t => {
   t.mock.method(globalThis, 'fetch', async input => {
-    const path = new URL(String(input)).pathname
-    if (path === '/sync/watched/movies') {
-      return Response.json([{
-        plays: 3,
-        last_watched_at: '2026-07-17T12:00:00Z',
+    const url = new URL(String(input))
+    if (url.pathname !== '/users/me/history') throw new Error(`Unexpected request: ${url.pathname}`)
+    if (url.searchParams.get('page') === '2') return Response.json([])
+    return Response.json([
+      {
+        id: 2,
+        type: 'movie',
+        watched_at: '2026-07-17T12:00:00Z',
         movie: {
           title: 'Replay',
           year: 2024,
-          ids: { trakt: 1, imdb: 'tt2015381' }
+          ids: { trakt: 1, imdb: 'tt2015381', tmdb: 118340 }
         }
-      }])
-    }
-    if (path === '/sync/watched/shows') return Response.json([])
-    throw new Error(`Unexpected request: ${path}`)
+      },
+      {
+        id: 1,
+        type: 'movie',
+        watched_at: '2026-07-16T12:00:00Z',
+        movie: {
+          title: 'Replay',
+          year: 2024,
+          ids: { trakt: 1, imdb: 'tt2015381', tmdb: 118340 }
+        }
+      }
+    ])
   })
   const scopes = { history: true, progress: false, library: false }
 
   const source = await pullMediaBridge({ connection: traktConnection('source'), scopes })
   const destination = await pullMediaBridge({ connection: traktConnection('destination'), scopes })
 
-  assert.equal(source.issues.length, 1)
-  assert.match(source.issues[0].reason, /2 earlier play events cannot be transferred/)
+  assert.equal(source.bundle.history.length, 1)
+  assert.equal(source.bundle.history[0].watchedAt, Date.parse('2026-07-17T12:00:00Z'))
+  assert.deepEqual(source.issues, [])
+  assert.equal(destination.bundle.history.length, 1)
   assert.deepEqual(destination.issues, [])
 })
 
-test('reads every Trakt watched page when pagination headers are unavailable', async t => {
+test('reads every Trakt history page and maps episodes through their parent show', async t => {
   const requestedPages: string[] = []
   t.mock.method(globalThis, 'fetch', async input => {
     const url = new URL(String(input))
@@ -356,11 +369,11 @@ test('reads every Trakt watched page when pagination headers are unavailable', a
     assert.equal(url.searchParams.get('limit'), '100')
     requestedPages.push(`${url.pathname}:${page}`)
 
-    if (url.pathname === '/sync/watched/movies') {
-      if (page === 1) {
-        return Response.json(Array.from({ length: 100 }, (_, index) => ({
-          plays: 1,
-          last_watched_at: `2026-07-17T${String(index % 24).padStart(2, '0')}:00:00Z`,
+    if (url.pathname === '/users/me/history') {
+      if (page === 1) return Response.json(Array.from({ length: 100 }, (_, index) => ({
+          id: index + 1,
+          type: 'movie',
+          watched_at: `2026-07-17T${String(index % 24).padStart(2, '0')}:00:00Z`,
           movie: {
             title: `Movie ${index + 1}`,
             year: 2024,
@@ -371,38 +384,43 @@ test('reads every Trakt watched page when pagination headers are unavailable', a
             }
           }
         })))
-      }
       if (page === 2) {
-        return Response.json([{
-          plays: 1,
-          last_watched_at: '2026-07-18T12:00:00Z',
-          movie: {
-            title: 'Movie 101',
-            year: 2024,
-            ids: { trakt: 101, imdb: 'tt0000101', tmdb: 101 }
+        return Response.json([
+          {
+            id: 101,
+            type: 'movie',
+            watched_at: '2026-07-18T12:00:00Z',
+            movie: {
+              title: 'Movie 101',
+              year: 2024,
+              ids: { trakt: 101, imdb: 'tt0000101', tmdb: 101 }
+            }
+          },
+          {
+            id: 102,
+            type: 'episode',
+            watched_at: '2026-07-18T13:00:00Z',
+            episode: { season: 1, number: 1, title: 'Pilot', ids: { trakt: 7001, tmdb: 9001 } },
+            show: {
+              title: 'Paged Series',
+              year: 2024,
+              ids: { trakt: 501, imdb: 'tt9000501', tmdb: 501 }
+            }
+          },
+          {
+            id: 103,
+            type: 'episode',
+            watched_at: '2026-07-18T14:00:00Z',
+            episode: { season: 1, number: 2, title: 'Second', ids: { trakt: 7002, tmdb: 9002 } },
+            show: {
+              title: 'Paged Series',
+              year: 2024,
+              ids: { trakt: 501, imdb: 'tt9000501', tmdb: 501 }
+            }
           }
-        }])
+        ])
       }
       return Response.json([])
-    }
-
-    if (url.pathname === '/sync/watched/shows') {
-      // This legacy endpoint can ignore page. Returning the same row verifies
-      // that the bridge stops on repetition without appending duplicates.
-      return Response.json([{
-        show: {
-          title: 'Paged Series',
-          year: 2024,
-          ids: { trakt: 501, imdb: 'tt9000501', tmdb: 501 }
-        },
-        seasons: [{
-          number: 1,
-          episodes: [
-            { number: 1, plays: 1, last_watched_at: '2026-07-17T12:00:00Z' },
-            { number: 2, plays: 1, last_watched_at: '2026-07-18T12:00:00Z' }
-          ]
-        }]
-      }])
     }
     throw new Error(`Unexpected request: ${url.pathname}`)
   })
@@ -415,15 +433,14 @@ test('reads every Trakt watched page when pagination headers are unavailable', a
   assert.equal(result.bundle.history.length, 103)
   assert.equal(result.bundle.history.filter(record => record.media.kind === 'movie').length, 101)
   assert.equal(result.bundle.history.filter(record => record.media.kind === 'series').length, 2)
+  const episodes = result.bundle.history.filter(record => record.media.kind === 'series')
+  assert.deepEqual(episodes.map(record => record.media.ids.tmdb), [501, 501])
+  assert.deepEqual(episodes.map(record => record.media.episode), [2, 1])
   assert.deepEqual(result.issues, [])
-  assert.deepEqual(requestedPages.filter(value => value.startsWith('/sync/watched/movies')), [
-    '/sync/watched/movies:1',
-    '/sync/watched/movies:2',
-    '/sync/watched/movies:3'
-  ])
-  assert.deepEqual(requestedPages.filter(value => value.startsWith('/sync/watched/shows')), [
-    '/sync/watched/shows:1',
-    '/sync/watched/shows:2'
+  assert.deepEqual(requestedPages, [
+    '/users/me/history:1',
+    '/users/me/history:2',
+    '/users/me/history:3'
   ])
 })
 
@@ -452,7 +469,11 @@ test('writes TMDB-first Nuvio IDs and enriches imported library metadata', async
         results: body.items.map((item: any) => ({
           content_id: item.content_id,
           posterUrl: 'https://image.tmdb.org/t/p/w500/poster.jpg',
+          backgroundUrl: 'https://image.tmdb.org/t/p/original/background.jpg',
+          description: 'A space adventure.',
           releaseDate: '2014-08-01',
+          imdbRating: 8.1,
+          genres: ['Action', 'Science Fiction'],
           source: 'tmdb'
         }))
       })
@@ -494,7 +515,11 @@ test('writes TMDB-first Nuvio IDs and enriches imported library metadata', async
   assert.equal(libraryItems[0].content_id, 'tmdb:118340')
   assert.equal(libraryItems[0].poster, 'https://image.tmdb.org/t/p/w500/poster.jpg')
   assert.equal(libraryItems[0].poster_shape, 'POSTER')
+  assert.equal(libraryItems[0].background, 'https://image.tmdb.org/t/p/original/background.jpg')
+  assert.equal(libraryItems[0].description, 'A space adventure.')
   assert.equal(libraryItems[0].release_info, '2014-08-01')
+  assert.equal(libraryItems[0].imdb_rating, 8.1)
+  assert.deepEqual(libraryItems[0].genres, ['Action', 'Science Fiction'])
   assert.deepEqual(result.issues, [])
 })
 

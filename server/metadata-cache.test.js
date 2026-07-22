@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import { createMetadataCache } from './metadata-cache.js';
 
 test('persists metadata entries without rewriting a JSON object', () => {
@@ -13,7 +14,11 @@ test('persists metadata entries without rewriting a JSON object', () => {
     const first = createMetadataCache({ file, now: () => 1_000 });
     first.setMany(new Map([['movie:tmdb:11', {
       posterUrl: 'https://image.example/11.jpg',
+      backgroundUrl: 'https://image.example/background.jpg',
+      description: 'A long time ago.',
       releaseDate: '1977-05-25',
+      imdbRating: 8.6,
+      genres: ['Adventure', 'Science Fiction'],
       source: 'tmdb',
       updatedAt: 1_000
     }]]));
@@ -23,11 +28,45 @@ test('persists metadata entries without rewriting a JSON object', () => {
     assert.deepEqual(second.getMany(['movie:tmdb:11']).get('movie:tmdb:11'), {
       posterUrl: 'https://image.example/11.jpg',
       releaseDate: '1977-05-25',
+      backgroundUrl: 'https://image.example/background.jpg',
+      description: 'A long time ago.',
+      imdbRating: 8.6,
+      genres: ['Adventure', 'Science Fiction'],
       source: 'tmdb',
       updatedAt: 1_000
     });
     assert.equal(second.stats().metadataEntries, 1);
     second.close();
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('invalidates legacy partial rows when adding the full-metadata cache column', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'nuvio-metadata-legacy-'));
+  const file = join(directory, 'metadata.sqlite');
+
+  try {
+    const legacy = new Database(file);
+    legacy.exec(`
+      CREATE TABLE metadata_cache (
+        cache_key TEXT PRIMARY KEY,
+        poster_url TEXT,
+        release_date TEXT,
+        source TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+      ) WITHOUT ROWID;
+      INSERT INTO metadata_cache VALUES (
+        'movie:tmdb:11', 'poster', '1977-05-25', 'tmdb', 1000, 999999
+      );
+    `);
+    legacy.close();
+
+    const migrated = createMetadataCache({ file, now: () => 2_000 });
+    assert.equal(migrated.stats().metadataEntries, 0);
+    assert.equal(migrated.getMany(['movie:tmdb:11']).size, 0);
+    migrated.close();
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

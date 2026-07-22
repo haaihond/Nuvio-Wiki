@@ -49,7 +49,11 @@ function publicResult(contentId, value, fromCache = false) {
   return {
     content_id: contentId,
     posterUrl: value.posterUrl || null,
+    backgroundUrl: value.backgroundUrl || null,
+    description: value.description || null,
     releaseDate: value.releaseDate || null,
+    imdbRating: Number.isFinite(value.imdbRating) ? value.imdbRating : null,
+    genres: Array.isArray(value.genres) ? value.genres : [],
     source: value.source,
     ...(value.retryable ? { retryable: true } : {}),
     ...(fromCache ? { fromCache: true } : {})
@@ -190,7 +194,15 @@ export function createMetadataEnricher({
 
     for (const item of normalizedItems) {
       if (item.keys.length === 0) {
-        prepared.push({ item, value: { posterUrl: null, releaseDate: null, source: 'missing' } });
+        prepared.push({ item, value: {
+          posterUrl: null,
+          backgroundUrl: null,
+          description: null,
+          releaseDate: null,
+          imdbRating: null,
+          genres: [],
+          source: 'missing'
+        } });
         continue;
       }
 
@@ -222,7 +234,11 @@ export function createMetadataEnricher({
         if (signal?.aborted) {
           task.result = {
             posterUrl: null,
+            backgroundUrl: null,
+            description: null,
             releaseDate: null,
+            imdbRating: null,
+            genres: [],
             source: 'failed',
             cacheable: false,
             retryable: true
@@ -234,7 +250,15 @@ export function createMetadataEnricher({
           const fetched = await fetchMetadata(task, { signal });
           task.result = {
             posterUrl: fetched?.posterUrl || null,
+            backgroundUrl: fetched?.backgroundUrl || null,
+            description: fetched?.description || null,
             releaseDate: fetched?.releaseDate || null,
+            imdbRating: Number.isFinite(Number(fetched?.imdbRating))
+              ? Number(fetched.imdbRating)
+              : null,
+            genres: Array.isArray(fetched?.genres)
+              ? fetched.genres.filter(genre => typeof genre === 'string' && genre.trim()).slice(0, 64)
+              : [],
             source: ['tmdb', 'cinemeta'].includes(fetched?.source) ? fetched.source : 'failed',
             resolvedTmdbId: normalizeTmdbId(fetched?.resolvedTmdbId),
             cacheable: fetched?.cacheable !== false,
@@ -245,7 +269,11 @@ export function createMetadataEnricher({
             || signal?.aborted;
           task.result = {
             posterUrl: null,
+            backgroundUrl: null,
+            description: null,
             releaseDate: null,
+            imdbRating: null,
+            genres: [],
             source: 'failed',
             cacheable: !retryable,
             retryable
@@ -255,7 +283,11 @@ export function createMetadataEnricher({
         if (task.result.cacheable) {
           const value = {
             posterUrl: task.result.posterUrl,
+            backgroundUrl: task.result.backgroundUrl,
+            description: task.result.description,
             releaseDate: task.result.releaseDate,
+            imdbRating: task.result.imdbRating,
+            genres: task.result.genres,
             source: task.result.source,
             updatedAt: Date.now()
           };
