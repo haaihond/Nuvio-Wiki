@@ -27,4 +27,4 @@
 - **Addons:** - [List of Available Addons](https://stremio-addons.net/)
 - **Anime Skip:** - [Generate Client ID for automatic skipping](https://anime-skip.com)
 - **Intro DB:** - [Generate API key for community intros/outros](https://introdb.app)
-- **SegmentScraper** - [Extract inro, outro and recap segements from popular streaming services](https://github.com/mronion212/SegmentScraper)
+- **SegmentScraper** - [Extract intro, outro and recap segements from popular streaming services](https://github.com/mronion212/SegmentScraper)
