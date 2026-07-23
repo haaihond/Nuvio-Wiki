@@ -330,7 +330,7 @@ test('normalizes titles and maps deterministic video, numbering, title, and abso
   assert.equal(byAbsolute.confidence, 'medium')
 })
 
-test('returns ambiguous or unresolved episode mappings instead of silently guessing', () => {
+test('maps an episode by ordered position after stronger matches fail', () => {
   const duplicateTitle = remapEpisode(
     { season: 1, episode: 3, title: 'Finale' },
     [{ season: 1, episode: 3, title: 'Finale' }],
@@ -343,19 +343,20 @@ test('returns ambiguous or unresolved episode mappings instead of silently guess
   assert.equal(duplicateTitle.candidates.length, 2)
 
   const ordinalOnly = remapEpisode(
-    { season: 1, episode: 2 },
+    { season: 1, episode: 2, absoluteEpisode: 10 },
     [
-      { season: 1, episode: 1 },
-      { season: 1, episode: 2 }
+      { season: 1, episode: 1, absoluteEpisode: 200 },
+      { season: 1, episode: 2, absoluteEpisode: 10 }
     ],
     [
       { season: 4, episode: 7 },
       { season: 4, episode: 8 }
     ]
   )
-  assert.equal(ordinalOnly.status, 'ambiguous')
+  assert.equal(ordinalOnly.status, 'mapped')
   assert.equal(ordinalOnly.confidence, 'low')
-  assert.equal(ordinalOnly.candidates[0].episode, 8)
+  assert.equal(ordinalOnly.target?.episode, 8)
+  assert.match(ordinalOnly.reason, /ordered episode list/)
 
   const unresolved = remapEpisode(
     { season: 1, episode: 1 },

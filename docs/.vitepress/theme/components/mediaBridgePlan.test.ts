@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   createEmptyBundle,
+  remapEpisode,
   type CanonicalBundle,
   type MediaRef,
   type SyncScopes
@@ -591,6 +592,17 @@ test('applies a deterministic episode remap before comparison and transfer', () 
   const source = createEmptyBundle()
   const sourceMedia = episode('tt501', 'Remapped Show', 1, 2)
   source.history.push({ media: sourceMedia, watchedAt: 500 })
+  const mapping = remapEpisode(
+    { season: 1, episode: 2 },
+    [
+      { season: 1, episode: 1 },
+      { season: 1, episode: 2 }
+    ],
+    [
+      { season: 4, episode: 7 },
+      { season: 4, episode: 8 }
+    ]
+  )
 
   const plan = planMediaBridgePreview({
     source,
@@ -599,20 +611,16 @@ test('applies a deterministic episode remap before comparison and transfer', () 
     mappingIssues: [{
       scope: 'history',
       sourceMedia,
-      mapping: {
-        status: 'mapped',
-        confidence: 'high',
-        target: { season: 1, episode: 3, title: 'Episode 2' },
-        candidates: [{ season: 1, episode: 3, title: 'Episode 2' }],
-        reason: 'Unique normalized title match.'
-      }
+      mapping
     }]
   })
 
   assert.equal(plan.stats.add, 1)
   assert.equal(plan.stats.remapped, 1)
-  assert.equal(plan.transfer.history[0].media.episode, 3)
+  assert.equal(plan.transfer.history[0].media.season, 4)
+  assert.equal(plan.transfer.history[0].media.episode, 8)
   assert.equal(plan.rows[0].remapped, true)
+  assert.equal(plan.rows[0].mappingConfidence, 'low')
   assert.equal(plan.rows[0].title, 'Remapped Show')
   assert.match(plan.rows[0].outcomeLabel, /remapped/)
   assert.notEqual(plan.rows[0].sourceKey, plan.rows[0].targetKey)

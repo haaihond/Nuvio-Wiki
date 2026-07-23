@@ -758,7 +758,7 @@ export type MappingConfidence = 'exact' | 'high' | 'medium' | 'low' | 'none'
 export type MappingOutcome =
   | {
       status: 'mapped'
-      confidence: Exclude<MappingConfidence, 'low' | 'none'>
+      confidence: Exclude<MappingConfidence, 'none'>
       target: EpisodeRef
       candidates: readonly EpisodeRef[]
       reason: string
@@ -781,9 +781,9 @@ export type MappingOutcome =
 function episodeSort(left: EpisodeRef, right: EpisodeRef): number {
   const leftAbsolute = validEpisode(left.absoluteEpisode) ? left.absoluteEpisode : Number.MAX_SAFE_INTEGER
   const rightAbsolute = validEpisode(right.absoluteEpisode) ? right.absoluteEpisode : Number.MAX_SAFE_INTEGER
-  return leftAbsolute - rightAbsolute
-    || left.season - right.season
+  return left.season - right.season
     || left.episode - right.episode
+    || leftAbsolute - rightAbsolute
     || normalizeTitle(left.title).localeCompare(normalizeTitle(right.title))
     || String(left.videoId || '').localeCompare(String(right.videoId || ''))
 }
@@ -813,7 +813,7 @@ function ambiguous(
 }
 
 function mapped(
-  confidence: Exclude<MappingConfidence, 'low' | 'none'>,
+  confidence: Exclude<MappingConfidence, 'none'>,
   target: EpisodeRef,
   reason: string
 ): MappingOutcome {
@@ -956,10 +956,10 @@ export function remapEpisode(
   const sourceIndex = orderedSource.findIndex(item => episodeSignature(item) === episodeSignature(source))
   const ordinalCandidate = sourceIndex >= 0 ? sortedEpisodes(targetEpisodes)[sourceIndex] : undefined
   if (ordinalCandidate) {
-    return ambiguous(
+    return mapped(
       'low',
-      [ordinalCandidate],
-      'Only the episode ordinal matched; manual review is required.'
+      ordinalCandidate,
+      'The episode was remapped by its position in the ordered episode list.'
     )
   }
 
