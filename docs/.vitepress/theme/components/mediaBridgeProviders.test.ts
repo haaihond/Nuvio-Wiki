@@ -1025,6 +1025,92 @@ test('uses the IMDb show ID when preflighting Trakt episodes against Nuvio metad
   assert.equal(mappings[0].mapping.target?.videoId, 'tt0944947:1:2')
 })
 
+test('tries later Nuvio metadata addons before skipping an episode', async t => {
+  const metadataHosts: string[] = []
+  t.mock.method(globalThis, 'fetch', async input => {
+    const url = new URL(String(input))
+    if (url.pathname === '/rest/v1/addons') {
+      return Response.json([
+        {
+          url: 'https://first-meta.test/manifest.json',
+          enabled: true,
+          sort_order: 1,
+          profile_id: 2
+        },
+        {
+          url: 'https://second-meta.test/manifest.json',
+          enabled: true,
+          sort_order: 2,
+          profile_id: 2
+        }
+      ])
+    }
+    if (url.pathname === '/manifest.json') {
+      return Response.json({ resources: ['meta'] })
+    }
+    if (url.pathname.startsWith('/meta/')) {
+      metadataHosts.push(url.host)
+      if (url.host === 'first-meta.test') return new Response(null, { status: 404 })
+      return Response.json({
+        meta: {
+          videos: [{ id: 'tt0944947:1:2', season: 1, episode: 2, title: 'The Kingsroad' }]
+        }
+      })
+    }
+    throw new Error(`Unexpected request: ${url}`)
+  })
+
+  const connection = nuvioConnection()
+  connection.accountId = 'multi-addon-user'
+  connection.profileId = 2
+  const bundle = createEmptyBundle()
+  bundle.history.push({
+    media: {
+      kind: 'series',
+      ids: { imdb: 'tt0944947', tmdb: 1399, trakt: 1390 },
+      title: 'Game of Thrones',
+      season: 1,
+      episode: 2,
+      episodeTitle: 'The Kingsroad'
+    },
+    watchedAt: Date.UTC(2026, 6, 17),
+    playCount: 1
+  })
+
+  const mappings = await inspectDestinationMappings(
+    connection,
+    bundle,
+    { history: true, progress: false, library: false }
+  )
+
+  assert.deepEqual([...new Set(metadataHosts)], ['first-meta.test', 'second-meta.test'])
+  assert.equal(mappings[0].mapping.status, 'mapped')
+  assert.equal(mappings[0].mapping.target?.videoId, 'tt0944947:1:2')
+})
+
+test('counts every item rejected by the Nuvio writer', async () => {
+  const bundle = createEmptyBundle()
+  bundle.history.push({
+    media: {
+      kind: 'movie',
+      ids: {},
+      title: 'Missing ID'
+    },
+    watchedAt: Date.UTC(2026, 6, 17),
+    playCount: 1
+  })
+  const result = await pushMediaBridge({
+    connection: nuvioConnection(),
+    bundle,
+    scopes: { history: true, progress: false, library: false }
+  })
+
+  assert.equal(result.written.history, 0)
+  assert.equal(result.skipped?.history, 1)
+  assert.equal(result.issues.length, 1)
+  assert.match(result.issues[0].reason, /supported content ID/)
+})
+
 test('signs in to a Jellyfin server without keeping the password in the connection result', async t => {
   let authorization = ''
   let body: any = null

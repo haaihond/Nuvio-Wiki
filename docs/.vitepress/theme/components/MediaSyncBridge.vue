@@ -791,10 +791,27 @@ async function preparePlan(
     scopes: requestedScopes,
     mappingIssues
   })
+  const planIssues: BridgeIssue[] = plan.rows
+    .filter(row => row.outcome === 'unresolved' || row.outcome === 'ambiguous')
+    .map(row => ({
+      scope: row.scope,
+      status: row.outcome as 'unresolved' | 'ambiguous',
+      media: row.media,
+      reason: row.detail
+    }))
   return {
     plan,
     destination: destinationResult.bundle,
-    issues: [...sourceResult.issues, ...destinationResult.issues]
+    issues: [...sourceResult.issues, ...destinationResult.issues, ...planIssues]
+  }
+}
+
+function appendIssueLogs(issues: readonly BridgeIssue[]) {
+  for (const issue of issues) {
+    const media = formatIssueMedia(issue)
+    const subject = media ? ` "${media}"` : ''
+    const label = issue.status === 'note' ? 'Note' : issue.status === 'warning' ? 'Warning' : 'Skipped'
+    appendLog(`${label} ${formatScope(issue.scope).toLowerCase()}${subject}: ${issue.reason}`)
   }
 }
 
@@ -819,6 +836,7 @@ async function buildPreview() {
     const prepared = await preparePlan(sourceConnection, destinationConnection, requestedScopes)
     preview.value = prepared.plan
     providerIssues.value = prepared.issues
+    appendIssueLogs(prepared.issues)
     previewSignature.value = currentSignature.value
     previewPage.value = 1
     const changes = planTransferCount(prepared.plan)
@@ -863,9 +881,10 @@ async function runSync() {
     // reusing stale writes on providers whose history endpoints are append-only.
     const prepared = await preparePlan(sourceConnection, destinationConnection, requestedScopes)
     providerIssues.value = prepared.issues
+    appendIssueLogs(prepared.issues)
     const transfer = mutableTransfer(prepared.plan)
     const changes = planTransferCount(prepared.plan)
-    appendLog(`Comparison complete: ${changes} changes are ready.`)
+    appendLog(`Comparison complete: ${changes} changes are ready; ${prepared.plan.stats.skipped} items were skipped.`)
     if (changes === 0) {
       syncResult.value = {
         written: { history: 0, progress: 0, library: 0 },
@@ -935,6 +954,7 @@ async function runSync() {
     }
     syncResult.value = result
     providerIssues.value = [...providerIssues.value, ...result.issues]
+    appendIssueLogs(result.issues)
     appendLog(`Sync finished. Wrote ${result.written.history} history, ${result.written.progress} progress, and ${result.written.library} saved-title records.`)
     statusMessage.value = syncHasWarnings.value ? copy.value.finishedWarnings : copy.value.result
   } catch (error: any) {
@@ -1378,7 +1398,7 @@ onBeforeUnmount(() => {
             <div><strong>{{ preview.stats.update }}</strong><span>{{ copy.update }}</span></div>
             <div><strong>{{ preview.stats.alreadyPresent }}</strong><span>{{ copy.present }}</span></div>
             <div><strong>{{ preview.stats.remapped }}</strong><span>{{ copy.remapped }}</span></div>
-            <div><strong>{{ preview.stats.skipped + providerIssues.length }}</strong><span>{{ copy.skipped }}</span></div>
+            <div><strong>{{ providerIssues.length }}</strong><span>{{ copy.skipped }}</span></div>
           </div>
 
           <div class="preview-table-wrap">

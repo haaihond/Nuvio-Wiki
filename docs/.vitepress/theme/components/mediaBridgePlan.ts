@@ -32,6 +32,7 @@ export interface ProviderMappingIssue {
 export interface PreviewRow {
   readonly id: string
   readonly scope: BridgeScope
+  readonly media: MediaRef
   readonly mediaKind: MediaRef['kind']
   readonly title: string
   readonly outcome: PreviewOutcome
@@ -500,6 +501,7 @@ export function planMediaBridgePreview(input: MediaBridgePlanInput): MediaBridge
           stableKey: mediaLocator(originalMedia),
           sequence: sequence++,
           scope,
+          media: originalMedia,
           mediaKind: originalMedia.kind,
           title: displayTitle(originalMedia),
           outcome,
@@ -525,6 +527,7 @@ export function planMediaBridgePreview(input: MediaBridgePlanInput): MediaBridge
           stableKey: mediaLocator(originalMedia),
           sequence: sequence++,
           scope,
+          media: originalMedia,
           mediaKind: originalMedia.kind,
           title: displayTitle(originalMedia),
           outcome: 'unresolved',
@@ -579,6 +582,7 @@ export function planMediaBridgePreview(input: MediaBridgePlanInput): MediaBridge
         stableKey: targetKey,
         sequence: sequence++,
         scope,
+        media: destinationRecord?.media || mappedMedia,
         mediaKind: destinationRecord?.media.kind || mappedMedia.kind,
         title: displayTitle(destinationRecord?.media || mappedMedia),
         outcome,

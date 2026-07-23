@@ -2936,6 +2936,11 @@ async function pushNuvio(options: PushOptions): Promise<PushResult> {
   if (!Number.isInteger(profileId) || profileId < 1) throw new Error('Choose a Nuvio profile.')
   const issues: BridgeIssue[] = []
   const written: PushCounts = { history: 0, progress: 0, library: 0 }
+  const skipped: Partial<PushCounts> = {}
+  const skip = (issue: BridgeIssue) => {
+    issues.push(issue)
+    skipped[issue.scope] = (skipped[issue.scope] || 0) + 1
+  }
   const watchedRecords = scopes.history
     ? collapseHistoryToWatchedState(bundle.history)
     : []
@@ -2959,11 +2964,11 @@ async function pushNuvio(options: PushOptions): Promise<PushResult> {
       const metadata = metadataByMedia.get(record.media)
       const contentId = resolvedNuvioContentId(record.media, metadata)
       if (!contentId) {
-        issues.push({ scope: 'history', status: 'unresolved', media: record.media, reason: 'Nuvio needs a supported content ID.' })
+        skip({ scope: 'history', status: 'unresolved', media: record.media, reason: 'Nuvio needs a supported content ID.' })
         continue
       }
       if (record.media.kind === 'series' && (!Number.isInteger(record.media.season) || !Number.isInteger(record.media.episode))) {
-        issues.push({ scope: 'history', status: 'unresolved', media: record.media, reason: 'The Nuvio episode has no deterministic season and episode number.' })
+        skip({ scope: 'history', status: 'unresolved', media: record.media, reason: 'The Nuvio episode has no deterministic season and episode number.' })
         continue
       }
       rows.push({
@@ -3004,11 +3009,11 @@ async function pushNuvio(options: PushOptions): Promise<PushResult> {
       const contentId = resolvedNuvioContentId(record.media, metadata)
       const absolute = absoluteProgress(record)
       if (!contentId || !absolute) {
-        issues.push({ scope: 'progress', status: 'unresolved', media: record.media, reason: 'Nuvio progress needs a supported ID plus an absolute position and duration; percentage-only progress was skipped.' })
+        skip({ scope: 'progress', status: 'unresolved', media: record.media, reason: 'Nuvio progress needs a supported ID plus an absolute position and duration; percentage-only progress was skipped.' })
         continue
       }
       if (record.media.kind === 'series' && (!Number.isInteger(record.media.season) || !Number.isInteger(record.media.episode))) {
-        issues.push({ scope: 'progress', status: 'unresolved', media: record.media, reason: 'The Nuvio episode progress has no deterministic season and episode number.' })
+        skip({ scope: 'progress', status: 'unresolved', media: record.media, reason: 'The Nuvio episode progress has no deterministic season and episode number.' })
         continue
       }
       rows.push({
@@ -3052,7 +3057,7 @@ async function pushNuvio(options: PushOptions): Promise<PushResult> {
     for (const record of bundle.library) {
       const contentId = resolvedNuvioContentId(record.media, metadataByMedia.get(record.media))
       if (!contentId) {
-        issues.push({ scope: 'library', status: 'unresolved', media: record.media, reason: 'Nuvio needs a supported content ID for this library item.' })
+        skip({ scope: 'library', status: 'unresolved', media: record.media, reason: 'Nuvio needs a supported content ID for this library item.' })
         continue
       }
       imports.push({
@@ -3096,7 +3101,7 @@ async function pushNuvio(options: PushOptions): Promise<PushResult> {
     logTo(log, `Merged ${written.library} titles into the Nuvio library without removing unrelated items.`)
   }
 
-  return { written, issues }
+  return { written, skipped, issues }
 }
 
 function simklRows(data: any, bucket: 'movies' | 'shows' | 'anime'): any[] {
@@ -4035,7 +4040,7 @@ interface NuvioMetaAddon {
   baseUrl: string
 }
 
-const nuvioAddonCache = new Map<string, Promise<NuvioMetaAddon | null>>()
+const nuvioAddonCache = new Map<string, Promise<NuvioMetaAddon[]>>()
 const nuvioEpisodeCache = new Map<string, Promise<EpisodeRef[]>>()
 const traktTargetEpisodeCache = new Map<string, Promise<EpisodeRef[]>>()
 
@@ -4046,7 +4051,7 @@ function addonBaseUrl(value: unknown): string {
     .replace(/\/+$/, '')
 }
 
-async function nuvioMetadataAddon(connection: BridgeConnection): Promise<NuvioMetaAddon | null> {
+async function nuvioMetadataAddons(connection: BridgeConnection): Promise<NuvioMetaAddon[]> {
   const cacheKey = `${connection.accountId}:${connection.profileId}`
   if (!nuvioAddonCache.has(cacheKey)) {
     nuvioAddonCache.set(cacheKey, (async () => {
@@ -4055,6 +4060,7 @@ async function nuvioMetadataAddon(connection: BridgeConnection): Promise<NuvioMe
         profile_id: `eq.${Number(connection.profileId)}`,
         order: 'sort_order.asc'
       })
+      const addons: NuvioMetaAddon[] = []
       for (const row of Array.isArray(rows) ? rows : []) {
         if (!row?.url || row.enabled === false) continue
         const baseUrl = addonBaseUrl(row.url)
@@ -4063,12 +4069,12 @@ async function nuvioMetadataAddon(connection: BridgeConnection): Promise<NuvioMe
           const resources = Array.isArray(manifest?.resources) ? manifest.resources : []
           if (resources.some((resource: any) => (
             (typeof resource === 'string' ? resource : resource?.name) === 'meta'
-          ))) return { baseUrl }
+          ))) addons.push({ baseUrl })
         } catch {
           // Try the next enabled addon.
         }
       }
-      return null
+      return addons
     })())
   }
   return nuvioAddonCache.get(cacheKey)!
@@ -4083,23 +4089,25 @@ async function nuvioTargetEpisodes(
   const key = `${connection.accountId}:${connection.profileId}:${contentId}`
   if (!nuvioEpisodeCache.has(key)) {
     nuvioEpisodeCache.set(key, (async () => {
-      const addon = await nuvioMetadataAddon(connection)
-      if (!addon) return []
+      const addons = await nuvioMetadataAddons(connection)
+      if (!addons.length) return []
       const candidates = [
         contentId,
         media.ids.imdb,
         contentId.replace(/^(tmdb|tvdb|trakt|simkl):/i, '')
       ].filter(Boolean).map(String)
-      for (const candidate of [...new Set(candidates)]) {
-        for (const type of ['series', 'tv']) {
-          try {
-            const { data } = await requestBridgeJson(
-              `${addon.baseUrl}/meta/${type}/${encodeURIComponent(candidate)}.json`
-            )
-            const videos = orderedStremioVideos(data?.meta)
-            if (videos.length) return episodeRefs(videos)
-          } catch {
-            // Try the next ID/type combination.
+      for (const addon of addons) {
+        for (const candidate of [...new Set(candidates)]) {
+          for (const type of ['series', 'tv']) {
+            try {
+              const { data } = await requestBridgeJson(
+                `${addon.baseUrl}/meta/${type}/${encodeURIComponent(candidate)}.json`
+              )
+              const videos = orderedStremioVideos(data?.meta)
+              if (videos.length) return episodeRefs(videos)
+            } catch {
+              // Try the next ID/type/addon combination.
+            }
           }
         }
       }
