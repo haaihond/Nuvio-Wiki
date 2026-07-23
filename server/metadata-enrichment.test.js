@@ -31,6 +31,8 @@ test('bulk-loads cache hits without making upstream calls', async () => {
   const cache = createMemoryCache([['movie:tmdb:11', {
     posterUrl: 'poster',
     releaseDate: '1977-05-25',
+    resolvedTmdbId: '11',
+    resolvedImdbId: 'tt0076759',
     source: 'tmdb'
   }]]);
   let fetches = 0;
@@ -50,6 +52,8 @@ test('bulk-loads cache hits without making upstream calls', async () => {
 
   assert.equal(fetches, 0);
   assert.equal(output.results[0].posterUrl, 'poster');
+  assert.equal(output.results[0].tmdbId, '11');
+  assert.equal(output.results[0].imdbId, 'tt0076759');
   assert.equal(output.results[0].fromCache, true);
   assert.equal(output.summary.cached, 1);
 });
@@ -69,7 +73,8 @@ test('deduplicates repeated IDs and writes all aliases in one batch', async () =
         imdbRating: 8.4,
         genres: ['Drama'],
         source: 'tmdb',
-        resolvedTmdbId: item.tmdbId
+        resolvedTmdbId: item.tmdbId,
+        resolvedImdbId: item.imdbId
       };
     }
   });
@@ -88,8 +93,33 @@ test('deduplicates repeated IDs and writes all aliases in one batch', async () =
   assert.equal(output.results[0].description, 'Description');
   assert.equal(output.results[0].imdbRating, 8.4);
   assert.deepEqual(output.results[0].genres, ['Drama']);
+  assert.equal(output.results[0].tmdbId, '99');
+  assert.equal(output.results[0].imdbId, 'tt0000099');
   assert.equal(cache.values.has('movie:tmdb:99'), true);
   assert.equal(cache.values.has('movie:imdb:tt0000099'), true);
+});
+
+test('returns and caches the corresponding IMDb ID for a TMDB-only item', async () => {
+  const cache = createMemoryCache();
+  const enricher = createMetadataEnricher({
+    cache,
+    fetchMetadata: async item => ({
+      source: 'tmdb',
+      resolvedTmdbId: item.tmdbId,
+      resolvedImdbId: 'tt2015381'
+    })
+  });
+
+  const output = await enricher.enrich([{
+    content_id: 'lookup-1',
+    content_type: 'movie',
+    _ids: { tmdb: 118340 }
+  }]);
+
+  assert.equal(output.results[0].tmdbId, '118340');
+  assert.equal(output.results[0].imdbId, 'tt2015381');
+  assert.equal(cache.values.has('movie:tmdb:118340'), true);
+  assert.equal(cache.values.has('movie:imdb:tt2015381'), true);
 });
 
 test('marks deadline-aborted work as retryable and does not cache it', async () => {

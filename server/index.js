@@ -1332,12 +1332,14 @@ async function fetchCinemeta(type, imdbId, signal) {
     releaseDate: meta?.released || null,
     imdbRating: Number.isFinite(Number(meta?.imdbRating)) ? Number(meta.imdbRating) : null,
     genres: Array.isArray(meta?.genres) ? meta.genres : [],
-    source: 'cinemeta'
+    source: 'cinemeta',
+    resolvedImdbId: imdbId
   };
 }
 
 async function resolveMetadata(item, { signal }) {
   let resolvedTmdbId = item.tmdbId;
+  let resolvedImdbId = item.imdbId;
   let sawTransientFailure = false;
 
   if (process.env.TMDB_API_KEY) {
@@ -1355,9 +1357,13 @@ async function resolveMetadata(item, { signal }) {
       if (resolvedTmdbId) {
         const detail = await fetchTmdb(
           item.type === 'movie' ? `/3/movie/${resolvedTmdbId}` : `/3/tv/${resolvedTmdbId}`,
-          {},
+          { append_to_response: 'external_ids' },
           signal
         );
+        const detailImdbId = String(
+          detail?.imdb_id || detail?.external_ids?.imdb_id || ''
+        ).trim().toLowerCase();
+        if (/^tt\d+$/.test(detailImdbId)) resolvedImdbId = detailImdbId;
         return {
           posterUrl: detail?.poster_path
             ? `https://image.tmdb.org/t/p/w500${detail.poster_path}`
@@ -1376,7 +1382,8 @@ async function resolveMetadata(item, { signal }) {
             ? detail.genres.map(genre => genre?.name).filter(Boolean)
             : [],
           source: 'tmdb',
-          resolvedTmdbId
+          resolvedTmdbId,
+          resolvedImdbId
         };
       }
     } catch (error) {
@@ -1387,7 +1394,7 @@ async function resolveMetadata(item, { signal }) {
   if (!signal?.aborted && item.imdbId) {
     try {
       const fallback = await fetchCinemeta(item.type, item.imdbId, signal);
-      return { ...fallback, resolvedTmdbId };
+      return { ...fallback, resolvedTmdbId, resolvedImdbId };
     } catch (error) {
       sawTransientFailure ||= isTransientMetadataError(error);
     }
@@ -1402,6 +1409,7 @@ async function resolveMetadata(item, { signal }) {
     genres: [],
     source: 'failed',
     resolvedTmdbId,
+    resolvedImdbId,
     cacheable: !sawTransientFailure && !signal?.aborted,
     retryable: sawTransientFailure || signal?.aborted
   };

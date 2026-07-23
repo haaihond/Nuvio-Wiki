@@ -38,6 +38,8 @@ const CINEMETA_API = 'https://v3-cinemeta.strem.io'
 const NUVIO_API = 'https://api.nuvio.tv'
 const TRAKT_MAX_RESUME_PROGRESS = 79
 const TRAKT_PAGE_SIZE = 100
+const TRAKT_READ_CONCURRENCY = 6
+const TRAKT_PAGE_CONCURRENCY = 4
 const SIMKL_PROGRESS_IMPORT_TIMEOUT_MS = 30_000
 const NUVIO_METADATA_BATCH_SIZE = 400
 const NUVIO_METADATA_BATCH_CONCURRENCY = 4
@@ -226,6 +228,37 @@ interface JsonResponse<T = any> {
 }
 
 const lastServiceWrite = new WeakMap<object, number>()
+const traktTokenRefreshes = new WeakMap<object, Promise<string>>()
+
+type AsyncLimiter = <T>(operation: () => Promise<T>) => Promise<T>
+
+const traktReadLimiters = new WeakMap<object, AsyncLimiter>()
+
+function createAsyncLimiter(concurrency: number): AsyncLimiter {
+  let active = 0
+  const waiting: Array<() => void> = []
+  return async function limit<T>(operation: () => Promise<T>): Promise<T> {
+    if (active >= concurrency) {
+      await new Promise<void>(resolve => waiting.push(resolve))
+    }
+    active++
+    try {
+      return await operation()
+    } finally {
+      active--
+      waiting.shift()?.()
+    }
+  }
+}
+
+function traktReadLimiter(credentials: object): AsyncLimiter {
+  let limiter = traktReadLimiters.get(credentials)
+  if (!limiter) {
+    limiter = createAsyncLimiter(TRAKT_READ_CONCURRENCY)
+    traktReadLimiters.set(credentials, limiter)
+  }
+  return limiter
+}
 
 async function waitForWriteSlot(credentials: object, minimumGapMs: number) {
   const waitMs = Math.max(0, (lastServiceWrite.get(credentials) || 0) + minimumGapMs - Date.now())
@@ -451,10 +484,12 @@ function nuvioContentIds(media: MediaRef): string[] {
   const add = (value: string | null) => {
     if (value && !ids.includes(value)) ids.push(value)
   }
+  if (media.ids.imdb && /^tt\d+$/i.test(String(media.ids.imdb))) {
+    add(String(media.ids.imdb).toLowerCase())
+  }
   if (media.ids.tmdb !== undefined && media.ids.tmdb !== null && String(media.ids.tmdb).trim()) {
     add(`tmdb:${media.ids.tmdb}`)
   }
-  if (media.ids.imdb && /^tt\d+$/i.test(String(media.ids.imdb))) add(String(media.ids.imdb))
   for (const namespace of ['tvdb', 'trakt', 'simkl'] as const) {
     const value = media.ids[namespace]
     if (value !== undefined && value !== null && String(value).trim()) {
@@ -471,12 +506,14 @@ function nuvioContentId(media: MediaRef): string | null {
 }
 
 function stremioContentId(media: MediaRef): string | null {
+  if (media.ids.imdb && /^tt\d+$/i.test(String(media.ids.imdb))) {
+    return String(media.ids.imdb).toLowerCase()
+  }
   if (media.ids.stremio) {
     const raw = String(media.ids.stremio)
     const match = /^(.*):\d+:\d+$/.exec(raw)
     return match?.[1] || raw
   }
-  if (media.ids.imdb) return String(media.ids.imdb)
   if (media.ids.tmdb !== undefined) return `tmdb:${media.ids.tmdb}`
   return firstExternalContentId(media)
 }
@@ -549,13 +586,24 @@ async function ensureTraktToken(connection: BridgeConnection): Promise<string> {
   const now = Math.floor(Date.now() / 1000)
   if (!expiresAt || now < expiresAt - 90) return token.access_token
   if (!token.refresh_token) throw new Error('The Trakt session expired. Reconnect the account.')
-  const { data } = await requestBridgeJson(credentials.refreshUrl, {
+  const currentRefresh = traktTokenRefreshes.get(credentials)
+  if (currentRefresh) return currentRefresh
+  const refresh = requestBridgeJson(credentials.refreshUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ refresh_token: token.refresh_token })
+  }).then(({ data }) => {
+    credentials.tokens = normalizeTraktTokens(data)
+    return credentials.tokens.access_token
   })
-  credentials.tokens = normalizeTraktTokens(data)
-  return credentials.tokens.access_token
+  traktTokenRefreshes.set(credentials, refresh)
+  try {
+    return await refresh
+  } finally {
+    if (traktTokenRefreshes.get(credentials) === refresh) {
+      traktTokenRefreshes.delete(credentials)
+    }
+  }
 }
 
 async function traktRequest(
@@ -583,7 +631,8 @@ async function traktRequest(
   const isWrite = String(options.method || 'GET').toUpperCase() !== 'GET'
   if (isWrite) await waitForWriteSlot(connection.credentials, 1_050)
   try {
-    return await requestBridgeJson(url.toString(), requestOptions)
+    const request = () => requestBridgeJson(url.toString(), requestOptions)
+    return await (isWrite ? request() : traktReadLimiter(connection.credentials)(request))
   } catch (error: any) {
     if (!isWrite || error?.status !== 429) throw error
     const retrySeconds = Math.max(1, Number(error.headers?.get?.('retry-after') || 1))
@@ -600,9 +649,43 @@ async function traktGetAll(
 ): Promise<any[]> {
   const output: any[] = []
   const seenPageStarts = new Set<string>()
-  let page = 1
   let limit = TRAKT_PAGE_SIZE
+  const firstResponse = await traktRequest(connection, path, { ...params, page: 1, limit })
+  const firstRows = Array.isArray(firstResponse.data) ? firstResponse.data : []
+  if (!firstRows.length) return output
+  output.push(...firstRows)
+  seenPageStarts.add(JSON.stringify(firstRows[0]))
+
+  const responsePage = Number(firstResponse.headers.get('x-pagination-page'))
+  const pageCount = Number(firstResponse.headers.get('x-pagination-page-count'))
+  const responseLimit = Number(firstResponse.headers.get('x-pagination-limit'))
+  let page = Number.isInteger(responsePage) && responsePage > 0 ? responsePage : 1
+  if (Number.isInteger(responseLimit) && responseLimit > 0) limit = responseLimit
+
+  if (Number.isInteger(pageCount) && pageCount > page) {
+    const remainingPages = Array.from(
+      { length: pageCount - page },
+      (_, index) => page + index + 1
+    )
+    const responses = await mapLimit(
+      remainingPages,
+      TRAKT_PAGE_CONCURRENCY,
+      nextPage => traktRequest(connection, path, { ...params, page: nextPage, limit })
+    )
+    for (const response of responses) {
+      const rows = Array.isArray(response.data) ? response.data : []
+      if (!rows.length) continue
+      const pageStart = JSON.stringify(rows[0])
+      if (seenPageStarts.has(pageStart)) break
+      seenPageStarts.add(pageStart)
+      output.push(...rows)
+    }
+    return output
+  }
+  if (Number.isInteger(pageCount) && pageCount > 0 && page >= pageCount) return output
+
   while (true) {
+    page++
     const response = await traktRequest(connection, path, { ...params, page, limit })
     const rows = Array.isArray(response.data) ? response.data : []
     if (!rows.length) break
@@ -614,13 +697,15 @@ async function traktGetAll(
     if (seenPageStarts.has(pageStart)) break
     seenPageStarts.add(pageStart)
     output.push(...rows)
-    const responsePage = Number(response.headers.get('x-pagination-page'))
-    const pageCount = Number(response.headers.get('x-pagination-page-count'))
-    const responseLimit = Number(response.headers.get('x-pagination-limit'))
-    const currentPage = Number.isInteger(responsePage) && responsePage > 0 ? responsePage : page
-    if (Number.isInteger(responseLimit) && responseLimit > 0) limit = responseLimit
-    if (Number.isInteger(pageCount) && pageCount > 0 && currentPage >= pageCount) break
-    page = currentPage >= page ? currentPage + 1 : page + 1
+    const nextResponsePage = Number(response.headers.get('x-pagination-page'))
+    const nextPageCount = Number(response.headers.get('x-pagination-page-count'))
+    const nextResponseLimit = Number(response.headers.get('x-pagination-limit'))
+    const currentPage = Number.isInteger(nextResponsePage) && nextResponsePage > 0
+      ? nextResponsePage
+      : page
+    if (Number.isInteger(nextResponseLimit) && nextResponseLimit > 0) limit = nextResponseLimit
+    if (Number.isInteger(nextPageCount) && nextPageCount > 0 && currentPage >= nextPageCount) break
+    if (currentPage > page) page = currentPage
   }
   return output
 }
@@ -2167,11 +2252,33 @@ async function pullTrakt(options: PullOptions): Promise<PullResult> {
   const issues: BridgeIssue[] = []
   const provenance = sourceOf(connection)
 
-  if (scopes.history) {
-    logTo(log, 'Reading Trakt paginated movie and episode history...')
-    const rows = await traktGetAll(connection, '/users/me/history', { extended: 'full' })
+  const historyRequest = scopes.history
+    ? (logTo(log, 'Reading Trakt paginated movie and episode history...'),
+      traktGetAll(connection, '/users/me/history', { extended: 'full' }))
+    : Promise.resolve<any[] | null>(null)
+  const progressRequest = scopes.progress
+    ? (logTo(log, 'Reading Trakt playback progress...'),
+      traktGetAll(connection, '/sync/playback', { extended: 'full' }))
+    : Promise.resolve<any[] | null>(null)
+  const libraryRequest = scopes.library
+    ? (logTo(log, 'Reading Trakt watchlist and collection...'),
+      Promise.all([
+        traktGetAll(connection, '/sync/watchlist/movies', { extended: 'full' }),
+        traktGetAll(connection, '/sync/watchlist/shows', { extended: 'full' }),
+        traktGetAll(connection, '/sync/collection/movies', { extended: 'full' }),
+        traktGetAll(connection, '/sync/collection/shows', { extended: 'full' })
+      ]))
+    : Promise.resolve<null>(null)
+
+  const [historyRows, progressRows, libraryRows] = await Promise.all([
+    historyRequest,
+    progressRequest,
+    libraryRequest
+  ])
+
+  if (historyRows) {
     let invalidRows = 0
-    for (const item of rows) {
+    for (const item of historyRows) {
       if ((item.type === 'movie' || item.movie) && item.movie) {
         bundle.history.push({
           media: mediaFromTrakt(item.movie, 'movie'),
@@ -2216,10 +2323,8 @@ async function pullTrakt(options: PullOptions): Promise<PullResult> {
     }
   }
 
-  if (scopes.progress) {
-    logTo(log, 'Reading Trakt playback progress...')
-    const rows = await traktGetAll(connection, '/sync/playback', { extended: 'full' })
-    for (const item of rows) {
+  if (progressRows) {
+    for (const item of progressRows) {
       const percentage = positiveNumber(item.progress)
       if (!percentage) continue
       const isMovie = item.type === 'movie' || Boolean(item.movie)
@@ -2253,14 +2358,8 @@ async function pullTrakt(options: PullOptions): Promise<PullResult> {
     }
   }
 
-  if (scopes.library) {
-    logTo(log, 'Reading Trakt watchlist and collection...')
-    const [watchlistMovies, watchlistShows, collectionMovies, collectionShows] = await Promise.all([
-      traktGetAll(connection, '/sync/watchlist/movies', { extended: 'full' }),
-      traktGetAll(connection, '/sync/watchlist/shows', { extended: 'full' }),
-      traktGetAll(connection, '/sync/collection/movies', { extended: 'full' }),
-      traktGetAll(connection, '/sync/collection/shows', { extended: 'full' })
-    ])
+  if (libraryRows) {
+    const [watchlistMovies, watchlistShows, collectionMovies, collectionShows] = libraryRows
     const addRows = (rows: any[], kind: 'movie' | 'series', listKind: 'watchlist' | 'collection') => {
       for (const item of rows) {
         const media = mediaFromTrakt(kind === 'movie' ? item.movie : item.show, kind)
@@ -2619,6 +2718,19 @@ async function pullNuvio(options: PullOptions): Promise<PullResult> {
     }
   }
 
+  const pulledRecords = [
+    ...bundle.history,
+    ...bundle.progress,
+    ...bundle.library
+  ]
+  const metadataByMedia = await loadBridgeMetadata(
+    pulledRecords.map(record => record.media),
+    log
+  )
+  for (const record of pulledRecords) {
+    record.media = withResolvedExternalIds(record.media, metadataByMedia.get(record.media))
+  }
+
   return { bundle: dedupeBundle(bundle), issues }
 }
 
@@ -2649,8 +2761,10 @@ interface NuvioLibraryImport {
   media: MediaRef
 }
 
-interface NuvioMetadataResult {
+interface BridgeMetadataResult {
   content_id: string | number
+  tmdbId?: string | number | null
+  imdbId?: string | null
   posterUrl?: string | null
   backgroundUrl?: string | null
   description?: string | null
@@ -2660,12 +2774,43 @@ interface NuvioMetadataResult {
   retryable?: boolean
 }
 
+function withResolvedExternalIds(
+  media: MediaRef,
+  metadata?: BridgeMetadataResult
+): MediaRef {
+  const ids = { ...media.ids }
+  const imdbId = String(metadata?.imdbId || '').trim().toLowerCase()
+  if (/^tt\d+$/.test(imdbId)) ids.imdb = imdbId
+  const tmdbId = String(metadata?.tmdbId || '').trim()
+  if (/^[1-9]\d*$/.test(tmdbId)) {
+    const numeric = Number(tmdbId)
+    ids.tmdb = Number.isSafeInteger(numeric) ? numeric : tmdbId
+  }
+  return { ...media, ids }
+}
+
+function resolvedNuvioContentId(
+  media: MediaRef,
+  metadata?: BridgeMetadataResult
+): string | null {
+  return nuvioContentId(withResolvedExternalIds(media, metadata))
+}
+
+function alternateNuvioContentIds(
+  media: MediaRef,
+  preferredId: string,
+  metadata?: BridgeMetadataResult
+): string[] {
+  return nuvioContentIds(withResolvedExternalIds(media, metadata))
+    .filter(contentId => contentId !== preferredId)
+}
+
 async function enrichNuvioMetadataChunk(
   items: readonly Record<string, any>[],
   attempt = 0
-): Promise<NuvioMetadataResult[]> {
+): Promise<BridgeMetadataResult[]> {
   try {
-    const { data } = await requestBridgeJson<{ results?: NuvioMetadataResult[] }>(
+    const { data } = await requestBridgeJson<{ results?: BridgeMetadataResult[] }>(
       '/api/trakt/enrich-metadata',
       {
         method: 'POST',
@@ -2689,23 +2834,39 @@ async function enrichNuvioMetadataChunk(
   }
 }
 
-async function enrichNuvioLibraryImports(
-  imports: NuvioLibraryImport[],
+async function loadBridgeMetadata(
+  mediaRefs: readonly MediaRef[],
   log?: BridgeLog
-) {
-  if (!imports.length) return
-  logTo(log, `Enriching ${imports.length} imported Nuvio library titles with TMDB metadata...`)
-  const metadataItems = imports.map(({ item, media }) => ({
-    content_id: item.content_id,
-    content_type: item.content_type,
-    name: String(item.name || 'Untitled').slice(0, 256),
-    _ids: {
-      tmdb: media.ids.tmdb,
-      imdb: media.ids.imdb
+): Promise<Map<MediaRef, BridgeMetadataResult>> {
+  const metadataByMedia = new Map<MediaRef, BridgeMetadataResult>()
+  const groups = new Map<string, { media: MediaRef; refs: MediaRef[]; lookupId: string }>()
+  for (const media of mediaRefs) {
+    const imdb = String(media.ids.imdb || '').trim().toLowerCase()
+    const tmdb = String(media.ids.tmdb ?? '').trim()
+    if (!/^tt\d+$/.test(imdb) && !/^[1-9]\d*$/.test(tmdb)) continue
+    const key = `${media.kind}:imdb:${imdb}:tmdb:${tmdb}`
+    const current = groups.get(key)
+    if (current) {
+      current.refs.push(media)
+    } else {
+      groups.set(key, {
+        media,
+        refs: [media],
+        lookupId: `bridge:${groups.size + 1}`
+      })
     }
+  }
+  if (!groups.size) return metadataByMedia
+
+  logTo(log, `Resolving ${groups.size} selected title IDs and TMDB metadata...`)
+  const metadataItems = [...groups.values()].map(({ media, lookupId }) => ({
+    content_id: lookupId,
+    content_type: media.kind === 'movie' ? 'movie' : 'series',
+    name: String(media.title || 'Untitled').slice(0, 256),
+    _ids: { tmdb: media.ids.tmdb, imdb: media.ids.imdb }
   }))
   const metadataChunks = chunk(metadataItems, NUVIO_METADATA_BATCH_SIZE)
-  const results: NuvioMetadataResult[] = []
+  const results: BridgeMetadataResult[] = []
 
   for (let offset = 0; offset < metadataChunks.length; offset += NUVIO_METADATA_BATCH_CONCURRENCY) {
     const wave = metadataChunks.slice(offset, offset + NUVIO_METADATA_BATCH_CONCURRENCY)
@@ -2726,10 +2887,22 @@ async function enrichNuvioLibraryImports(
     )
   }
 
-  const byContentId = new Map<string | number, NuvioMetadataResult>()
+  const byContentId = new Map<string | number, BridgeMetadataResult>()
   for (const result of results) byContentId.set(result.content_id, result)
+  for (const group of groups.values()) {
+    const metadata = byContentId.get(group.lookupId)
+    if (!metadata) continue
+    for (const media of group.refs) metadataByMedia.set(media, metadata)
+  }
+  return metadataByMedia
+}
+
+function enrichNuvioLibraryImports(
+  imports: NuvioLibraryImport[],
+  metadataByMedia: ReadonlyMap<MediaRef, BridgeMetadataResult>
+) {
   for (const entry of imports) {
-    const metadata = byContentId.get(entry.item.content_id)
+    const metadata = metadataByMedia.get(entry.media)
     if (metadata?.posterUrl) {
       entry.item.poster = metadata.posterUrl
       entry.item.poster_shape = 'POSTER'
@@ -2763,11 +2936,28 @@ async function pushNuvio(options: PushOptions): Promise<PushResult> {
   if (!Number.isInteger(profileId) || profileId < 1) throw new Error('Choose a Nuvio profile.')
   const issues: BridgeIssue[] = []
   const written: PushCounts = { history: 0, progress: 0, library: 0 }
+  const watchedRecords = scopes.history
+    ? collapseHistoryToWatchedState(bundle.history)
+    : []
+  const metadataMedia = [
+    ...watchedRecords
+      .filter(record => !/^tt\d+$/i.test(String(record.media.ids.imdb || '')))
+      .map(record => record.media),
+    ...(scopes.progress
+      ? bundle.progress
+        .filter(record => !/^tt\d+$/i.test(String(record.media.ids.imdb || '')))
+        .map(record => record.media)
+      : []),
+    ...(scopes.library ? bundle.library.map(record => record.media) : [])
+  ]
+  const metadataByMedia = await loadBridgeMetadata(metadataMedia, log)
 
-  if (scopes.history && bundle.history.length) {
+  if (scopes.history && watchedRecords.length) {
     const rows: any[] = []
-    for (const record of collapseHistoryToWatchedState(bundle.history)) {
-      const contentId = nuvioContentId(record.media)
+    const legacyKeys = new Map<string, Record<string, any>>()
+    for (const record of watchedRecords) {
+      const metadata = metadataByMedia.get(record.media)
+      const contentId = resolvedNuvioContentId(record.media, metadata)
       if (!contentId) {
         issues.push({ scope: 'history', status: 'unresolved', media: record.media, reason: 'Nuvio needs a supported content ID.' })
         continue
@@ -2783,6 +2973,21 @@ async function pushNuvio(options: PushOptions): Promise<PushResult> {
         ...(record.media.kind === 'series' ? { season: record.media.season, episode: record.media.episode } : {}),
         watched_at: record.watchedAt
       })
+      for (const legacyId of alternateNuvioContentIds(record.media, contentId, metadata)) {
+        const key = {
+          content_id: legacyId,
+          ...(record.media.kind === 'series'
+            ? { season: record.media.season, episode: record.media.episode }
+            : {})
+        }
+        legacyKeys.set(JSON.stringify(key), key)
+      }
+    }
+    if (legacyKeys.size) {
+      await nuvioRpc(connection, 'sync_delete_watched_items', {
+        p_profile_id: profileId,
+        p_keys: [...legacyKeys.values()]
+      })
     }
     for (const rowsBatch of chunk(rows, 500)) {
       await nuvioRpc(connection, 'sync_push_watched_items', { p_profile_id: profileId, p_items: rowsBatch })
@@ -2793,8 +2998,10 @@ async function pushNuvio(options: PushOptions): Promise<PushResult> {
 
   if (scopes.progress && bundle.progress.length) {
     const rows: any[] = []
+    const legacyKeys = new Set<string>()
     for (const record of bundle.progress) {
-      const contentId = nuvioContentId(record.media)
+      const metadata = metadataByMedia.get(record.media)
+      const contentId = resolvedNuvioContentId(record.media, metadata)
       const absolute = absoluteProgress(record)
       if (!contentId || !absolute) {
         issues.push({ scope: 'progress', status: 'unresolved', media: record.media, reason: 'Nuvio progress needs a supported ID plus an absolute position and duration; percentage-only progress was skipped.' })
@@ -2817,6 +3024,17 @@ async function pushNuvio(options: PushOptions): Promise<PushResult> {
         duration: Math.round(absolute.durationMs),
         last_watched: record.updatedAt
       })
+      for (const legacyId of alternateNuvioContentIds(record.media, contentId, metadata)) {
+        legacyKeys.add(record.media.kind === 'series'
+          ? `${legacyId}_s${record.media.season}e${record.media.episode}`
+          : legacyId)
+      }
+    }
+    if (legacyKeys.size) {
+      await nuvioRpc(connection, 'sync_delete_watch_progress', {
+        p_profile_id: profileId,
+        p_keys: [...legacyKeys]
+      })
     }
     for (const rowsBatch of chunk(rows, 300)) {
       await nuvioRpc(connection, 'sync_push_watch_progress', { p_profile_id: profileId, p_entries: rowsBatch })
@@ -2832,7 +3050,7 @@ async function pushNuvio(options: PushOptions): Promise<PushResult> {
     for (const item of existing) merged.set(`${item.content_type}:${item.content_id}`, cleanNuvioLibraryItem(item))
     const imports: NuvioLibraryImport[] = []
     for (const record of bundle.library) {
-      const contentId = nuvioContentId(record.media)
+      const contentId = resolvedNuvioContentId(record.media, metadataByMedia.get(record.media))
       if (!contentId) {
         issues.push({ scope: 'library', status: 'unresolved', media: record.media, reason: 'Nuvio needs a supported content ID for this library item.' })
         continue
@@ -2848,14 +3066,15 @@ async function pushNuvio(options: PushOptions): Promise<PushResult> {
       })
       written.library++
     }
-    await enrichNuvioLibraryImports(imports, log)
+    enrichNuvioLibraryImports(imports, metadataByMedia)
     for (const { item, media } of imports) {
       const key = `${item.content_type}:${item.content_id}`
       let current = merged.get(key) || {}
-      // A previous bridge version stored IMDb first. When the same source row
-      // now provides TMDB, fold that legacy entry into the preferred key so a
-      // rerun repairs metadata instead of leaving a duplicate saved title.
-      for (const candidateId of nuvioContentIds(media)) {
+      // Fold any older TMDB-keyed row into the preferred IMDb key. Nuvio's
+      // library RPC accepts a complete snapshot, so omitting the alias removes
+      // the duplicate while preserving its metadata in the merged record.
+      const resolvedMedia = withResolvedExternalIds(media, metadataByMedia.get(media))
+      for (const candidateId of nuvioContentIds(resolvedMedia)) {
         const candidateKey = `${item.content_type}:${candidateId}`
         if (candidateKey === key || !merged.has(candidateKey)) continue
         current = { ...merged.get(candidateKey), ...current }
@@ -2874,7 +3093,7 @@ async function pushNuvio(options: PushOptions): Promise<PushResult> {
         p_items: [...merged.values()]
       })
     }
-    logTo(log, `Merged ${written.library} titles into the Nuvio library without removing existing items.`)
+    logTo(log, `Merged ${written.library} titles into the Nuvio library without removing unrelated items.`)
   }
 
   return { written, issues }
@@ -3437,9 +3656,17 @@ async function pullStremio(options: PullOptions): Promise<PullResult> {
   const bundle = createEmptyBundle()
   const issues: BridgeIssue[] = []
   const provenance = sourceOf(connection)
+  const rawMedia = items.map(mediaFromStremioItem)
+  const metadataByMedia = await loadBridgeMetadata(
+    rawMedia.filter(media => !/^tt\d+$/i.test(String(media.ids.imdb || ''))),
+    log
+  )
+  const resolvedItems = items.map((item, index) => ({
+    item,
+    media: withResolvedExternalIds(rawMedia[index], metadataByMedia.get(rawMedia[index]))
+  }))
 
-  await mapLimit(items, 6, async item => {
-    const media = mediaFromStremioItem(item)
+  await mapLimit(resolvedItems, 6, async ({ item, media }) => {
     const state = item?.state || {}
     const lastWatched = asEpochMs(state.lastWatched || item._mtime)
 
@@ -3593,9 +3820,20 @@ async function pushStremio(options: PushOptions): Promise<PushResult> {
     ids: [],
     all: true
   })
-  const current = new Map<string, any>(
-    (Array.isArray(currentRows) ? currentRows : []).map((item: any) => [String(item._id), item])
+  const currentItems = Array.isArray(currentRows) ? currentRows : []
+  const current = new Map<string, any>(currentItems.map((item: any) => [String(item._id), item]))
+  const currentMedia = currentItems.map(mediaFromStremioItem)
+  const currentMetadata = await loadBridgeMetadata(
+    currentMedia.filter(media => !/^tt\d+$/i.test(String(media.ids.imdb || ''))),
+    log
   )
+  const currentByAlias = new Map<string, any>()
+  currentItems.forEach((item: any, index: number) => {
+    const media = withResolvedExternalIds(currentMedia[index], currentMetadata.get(currentMedia[index]))
+    for (const alias of mediaAliasKeys(media)) {
+      if (!currentByAlias.has(alias)) currentByAlias.set(alias, item)
+    }
+  })
   const written: PushCounts = { history: 0, progress: 0, library: 0 }
   const skipped: PushCounts = { history: 0, progress: 0, library: 0 }
   const issues: BridgeIssue[] = []
@@ -3638,7 +3876,10 @@ async function pushStremio(options: PushOptions): Promise<PushResult> {
   if (scopes.library) bundle.library.forEach(record => addRecord('library', record))
 
   const changes = (await mapLimit([...byId.entries()], 5, async ([id, group]) => {
-    const existing = current.get(id)
+    const existing = current.get(id) || mediaAliasKeys(group.media)
+      .map(alias => currentByAlias.get(alias))
+      .find(Boolean)
+    const targetId = String(existing?._id || id)
     const meta = await fetchCinemetaMeta(group.media)
     const videos = orderedStremioVideos(meta)
     const isLibrary = group.library.length > 0
@@ -3651,8 +3892,8 @@ async function pushStremio(options: PushOptions): Promise<PushResult> {
     const timestamp = nowIso()
     const item: any = {
       ...(existing || {}),
-      _id: id,
-      name: existing?.name || meta?.name || group.media.title || id,
+      _id: targetId,
+      name: existing?.name || meta?.name || group.media.title || targetId,
       type: group.media.kind === 'movie' ? 'movie' : 'series',
       poster: existing?.poster || meta?.poster,
       posterShape: existing?.posterShape || meta?.posterShape || 'poster',
@@ -3683,7 +3924,7 @@ async function pushStremio(options: PushOptions): Promise<PushResult> {
         } else {
           item.state.timeOffset = Math.round(absolute.positionMs)
           item.state.duration = Math.round(absolute.durationMs)
-          item.state.video_id = id
+          item.state.video_id = targetId
           item.state.lastWatched = new Date(latest.updatedAt).toISOString()
           written.progress++
         }

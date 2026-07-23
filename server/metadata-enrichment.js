@@ -48,6 +48,8 @@ function normalizeItem(item) {
 function publicResult(contentId, value, fromCache = false) {
   return {
     content_id: contentId,
+    tmdbId: normalizeTmdbId(value.resolvedTmdbId),
+    imdbId: normalizeImdbId(value.resolvedImdbId),
     posterUrl: value.posterUrl || null,
     backgroundUrl: value.backgroundUrl || null,
     description: value.description || null,
@@ -239,6 +241,8 @@ export function createMetadataEnricher({
             releaseDate: null,
             imdbRating: null,
             genres: [],
+            resolvedTmdbId: task.tmdbId,
+            resolvedImdbId: task.imdbId,
             source: 'failed',
             cacheable: false,
             retryable: true
@@ -260,7 +264,8 @@ export function createMetadataEnricher({
               ? fetched.genres.filter(genre => typeof genre === 'string' && genre.trim()).slice(0, 64)
               : [],
             source: ['tmdb', 'cinemeta'].includes(fetched?.source) ? fetched.source : 'failed',
-            resolvedTmdbId: normalizeTmdbId(fetched?.resolvedTmdbId),
+            resolvedTmdbId: normalizeTmdbId(fetched?.resolvedTmdbId) || task.tmdbId,
+            resolvedImdbId: normalizeImdbId(fetched?.resolvedImdbId) || task.imdbId,
             cacheable: fetched?.cacheable !== false,
             retryable: fetched?.retryable === true
           };
@@ -274,6 +279,8 @@ export function createMetadataEnricher({
             releaseDate: null,
             imdbRating: null,
             genres: [],
+            resolvedTmdbId: task.tmdbId,
+            resolvedImdbId: task.imdbId,
             source: 'failed',
             cacheable: !retryable,
             retryable
@@ -288,12 +295,17 @@ export function createMetadataEnricher({
             releaseDate: task.result.releaseDate,
             imdbRating: task.result.imdbRating,
             genres: task.result.genres,
+            resolvedTmdbId: task.result.resolvedTmdbId,
+            resolvedImdbId: task.result.resolvedImdbId,
             source: task.result.source,
             updatedAt: Date.now()
           };
           for (const key of task.keys) cacheWrites.set(key, value);
           if (task.result.resolvedTmdbId) {
             cacheWrites.set(`${task.type}:tmdb:${task.result.resolvedTmdbId}`, value);
+          }
+          if (task.result.resolvedImdbId) {
+            cacheWrites.set(`${task.type}:imdb:${task.result.resolvedImdbId}`, value);
           }
         }
       }
@@ -307,7 +319,13 @@ export function createMetadataEnricher({
     cache.setMany(cacheWrites);
 
     const results = prepared.map(entry => {
-      if (entry.value) return publicResult(entry.item.contentId, entry.value, entry.fromCache);
+      if (entry.value) {
+        return publicResult(entry.item.contentId, {
+          ...entry.value,
+          resolvedTmdbId: entry.value.resolvedTmdbId || entry.item.tmdbId,
+          resolvedImdbId: entry.value.resolvedImdbId || entry.item.imdbId
+        }, entry.fromCache);
+      }
       return publicResult(
         entry.item.contentId,
         entry.task.result || { posterUrl: null, releaseDate: null, source: 'failed' }

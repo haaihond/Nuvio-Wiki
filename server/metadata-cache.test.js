@@ -19,6 +19,8 @@ test('persists metadata entries without rewriting a JSON object', () => {
       releaseDate: '1977-05-25',
       imdbRating: 8.6,
       genres: ['Adventure', 'Science Fiction'],
+      resolvedTmdbId: '11',
+      resolvedImdbId: 'tt0076759',
       source: 'tmdb',
       updatedAt: 1_000
     }]]));
@@ -32,6 +34,8 @@ test('persists metadata entries without rewriting a JSON object', () => {
       description: 'A long time ago.',
       imdbRating: 8.6,
       genres: ['Adventure', 'Science Fiction'],
+      resolvedTmdbId: '11',
+      resolvedImdbId: 'tt0076759',
       source: 'tmdb',
       updatedAt: 1_000
     });

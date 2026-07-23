@@ -651,8 +651,117 @@ test('continues Trakt pagination to an empty page when pagination headers are un
   ])
 })
 
-test('writes TMDB-first Nuvio IDs and enriches imported library metadata', async t => {
+test('reads selected Trakt scopes concurrently within the shared request limit', async t => {
+  let activeRequests = 0
+  let maximumActiveRequests = 0
+  const requestedPaths: string[] = []
+  t.mock.method(globalThis, 'fetch', async input => {
+    const url = new URL(String(input))
+    requestedPaths.push(url.pathname)
+    activeRequests++
+    maximumActiveRequests = Math.max(maximumActiveRequests, activeRequests)
+    await new Promise(resolve => setTimeout(resolve, 10))
+    activeRequests--
+    return Response.json([])
+  })
+
+  const result = await pullMediaBridge({
+    connection: traktConnection('source'),
+    scopes: { history: true, progress: true, library: true }
+  })
+
+  assert.equal(maximumActiveRequests, 6)
+  assert.deepEqual(new Set(requestedPaths), new Set([
+    '/users/me/history',
+    '/sync/playback',
+    '/sync/watchlist/movies',
+    '/sync/watchlist/shows',
+    '/sync/collection/movies',
+    '/sync/collection/shows'
+  ]))
+  assert.deepEqual(result.bundle, createEmptyBundle())
+})
+
+test('fetches known Trakt pagination pages with bounded concurrency', async t => {
+  let activeRequests = 0
+  let maximumActiveRequests = 0
+  t.mock.method(globalThis, 'fetch', async input => {
+    const url = new URL(String(input))
+    const page = Number(url.searchParams.get('page'))
+    if (page > 1) {
+      activeRequests++
+      maximumActiveRequests = Math.max(maximumActiveRequests, activeRequests)
+      await new Promise(resolve => setTimeout(resolve, 10))
+      activeRequests--
+    }
+    return Response.json([{
+      id: page,
+      type: 'movie',
+      watched_at: new Date(Date.UTC(2026, 6, page)).toISOString(),
+      movie: {
+        title: `Page ${page}`,
+        year: 2026,
+        ids: { trakt: page, imdb: `tt${String(page).padStart(7, '0')}` }
+      }
+    }], {
+      headers: {
+        'X-Pagination-Page': String(page),
+        'X-Pagination-Limit': '100',
+        'X-Pagination-Page-Count': '5'
+      }
+    })
+  })
+
+  const result = await pullMediaBridge({
+    connection: traktConnection('source'),
+    scopes: { history: true, progress: false, library: false }
+  })
+
+  assert.equal(maximumActiveRequests, 4)
+  assert.equal(result.bundle.history.length, 5)
+  assert.deepEqual(result.bundle.history.map(record => record.eventId), [5, 4, 3, 2, 1])
+})
+
+test('refreshes an expired Trakt token once for concurrent reads', async t => {
+  const connection = traktConnection('source')
+  if (connection.credentials.service !== 'trakt') throw new Error('Expected Trakt credentials.')
+  connection.credentials.tokens = {
+    access_token: 'expired-token',
+    refresh_token: 'refresh-token',
+    created_at: 1,
+    expires_in: 1
+  }
+  let refreshRequests = 0
+  let apiRequests = 0
+  t.mock.method(globalThis, 'fetch', async (input, init) => {
+    const url = new URL(String(input), 'https://nuvio.wiki')
+    if (url.pathname === '/api/trakt/refresh') {
+      refreshRequests++
+      await new Promise(resolve => setTimeout(resolve, 10))
+      return Response.json({
+        access_token: 'refreshed-token',
+        refresh_token: 'next-refresh-token',
+        created_at: Math.floor(Date.now() / 1000),
+        expires_in: 3_600
+      })
+    }
+    apiRequests++
+    assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer refreshed-token')
+    return Response.json([])
+  })
+
+  await pullMediaBridge({
+    connection,
+    scopes: { history: true, progress: true, library: true }
+  })
+
+  assert.equal(refreshRequests, 1)
+  assert.equal(apiRequests, 6)
+})
+
+test('writes IMDb-first Nuvio IDs while retaining TMDB for metadata enrichment', async t => {
   let watchedItems: any[] = []
+  let deletedWatchedKeys: any[] = []
   let metadataItems: any[] = []
   let libraryItems: any[] = []
   t.mock.method(globalThis, 'fetch', async (input, init) => {
@@ -662,19 +771,33 @@ test('writes TMDB-first Nuvio IDs and enriches imported library metadata', async
       watchedItems = body.p_items
       return Response.json(null)
     }
+    if (url.pathname === '/rest/v1/rpc/sync_delete_watched_items') {
+      deletedWatchedKeys = body.p_keys
+      return Response.json(null)
+    }
     if (url.pathname === '/rest/v1/rpc/sync_pull_library') {
-      return Response.json([{
-        content_id: 'tt2015381',
-        content_type: 'movie',
-        name: 'Guardians of the Galaxy',
-        added_at: Date.UTC(2026, 6, 15)
-      }])
+      return Response.json([
+        {
+          content_id: 'tt2015381',
+          content_type: 'movie',
+          name: 'Guardians of the Galaxy',
+          added_at: Date.UTC(2026, 6, 15)
+        },
+        {
+          content_id: 'tmdb:118340',
+          content_type: 'movie',
+          name: 'Guardians of the Galaxy',
+          added_at: Date.UTC(2026, 6, 14)
+        }
+      ])
     }
     if (url.pathname === '/api/trakt/enrich-metadata') {
       metadataItems = body.items
       return Response.json({
         results: body.items.map((item: any) => ({
           content_id: item.content_id,
+          tmdbId: item._ids.tmdb,
+          imdbId: item._ids.imdb,
           posterUrl: 'https://image.tmdb.org/t/p/w500/poster.jpg',
           backgroundUrl: 'https://image.tmdb.org/t/p/original/background.jpg',
           description: 'A space adventure.',
@@ -725,16 +848,25 @@ test('writes TMDB-first Nuvio IDs and enriches imported library metadata', async
 
   assert.equal(result.written.history, 2)
   assert.equal(result.written.library, 1)
-  assert.equal(watchedItems[0].content_id, 'tmdb:118340')
+  const watchedMovie = watchedItems.find(item => item.content_type === 'movie')
+  assert.equal(watchedMovie.content_id, 'tt2015381')
+  assert.deepEqual(
+    deletedWatchedKeys.map(item => JSON.stringify(item)).sort(),
+    [
+      { content_id: 'tmdb:118340' },
+      { content_id: 'trakt:28' },
+      { content_id: 'tmdb:1399', season: 0, episode: 44 }
+    ].map(item => JSON.stringify(item)).sort()
+  )
   const watchedEpisode = watchedItems.find(item => item.content_type === 'series')
   assert.equal(watchedEpisode.title, 'Game of Thrones')
   assert.equal(watchedEpisode.season, 0)
   assert.equal(watchedEpisode.episode, 44)
-  assert.equal(metadataItems[0].content_id, 'tmdb:118340')
+  assert.match(metadataItems[0].content_id, /^bridge:\d+$/)
   assert.deepEqual(metadataItems[0]._ids, { tmdb: 118340, imdb: 'tt2015381' })
   assert.equal(libraryItems.length, 1)
-  assert.equal(libraryItems.some(item => item.content_id === 'tt2015381'), false)
-  assert.equal(libraryItems[0].content_id, 'tmdb:118340')
+  assert.equal(libraryItems.some(item => item.content_id === 'tmdb:118340'), false)
+  assert.equal(libraryItems[0].content_id, 'tt2015381')
   assert.equal(libraryItems[0].poster, 'https://image.tmdb.org/t/p/w500/poster.jpg')
   assert.equal(libraryItems[0].poster_shape, 'POSTER')
   assert.equal(libraryItems[0].background, 'https://image.tmdb.org/t/p/original/background.jpg')
@@ -745,7 +877,102 @@ test('writes TMDB-first Nuvio IDs and enriches imported library metadata', async
   assert.deepEqual(result.issues, [])
 })
 
-test('uses the TMDB show ID when preflighting Trakt episodes against Nuvio metadata', async t => {
+test('resolves a TMDB-only source to the corresponding IMDb ID before writing Nuvio', async t => {
+  let metadataItems: any[] = []
+  let watchedItems: any[] = []
+  t.mock.method(globalThis, 'fetch', async (input, init) => {
+    const url = new URL(String(input), 'https://nuvio.wiki')
+    const body = JSON.parse(String(init?.body || '{}'))
+    if (url.pathname === '/api/trakt/enrich-metadata') {
+      metadataItems = body.items
+      return Response.json({
+        results: body.items.map((item: any) => ({
+          content_id: item.content_id,
+          tmdbId: '118340',
+          imdbId: 'tt2015381',
+          source: 'tmdb'
+        }))
+      })
+    }
+    if (url.pathname === '/rest/v1/rpc/sync_push_watched_items') {
+      watchedItems = body.p_items
+      return Response.json(null)
+    }
+    if (url.pathname === '/rest/v1/rpc/sync_delete_watched_items') {
+      return Response.json(null)
+    }
+    throw new Error(`Unexpected request: ${url.pathname}`)
+  })
+
+  const bundle = createEmptyBundle()
+  bundle.history.push({
+    media: {
+      kind: 'movie',
+      ids: { tmdb: 118340 },
+      title: 'Guardians of the Galaxy',
+      year: 2014
+    },
+    watchedAt: Date.UTC(2026, 6, 17),
+    playCount: 1
+  })
+
+  await pushMediaBridge({
+    connection: nuvioConnection(),
+    bundle,
+    scopes: { history: true, progress: false, library: false }
+  })
+
+  assert.equal(metadataItems.length, 1)
+  assert.equal(metadataItems[0]._ids.tmdb, 118340)
+  assert.equal(watchedItems[0].content_id, 'tt2015381')
+})
+
+test('folds mixed Nuvio IMDb and TMDB library rows through resolved aliases', async t => {
+  t.mock.method(globalThis, 'fetch', async (input, init) => {
+    const url = new URL(String(input), 'https://nuvio.wiki')
+    const body = JSON.parse(String(init?.body || '{}'))
+    if (url.pathname === '/rest/v1/rpc/sync_pull_library') {
+      return Response.json([
+        {
+          content_id: 'tt2015381',
+          content_type: 'movie',
+          name: 'Guardians of the Galaxy',
+          release_info: '2014-08-01',
+          added_at: 100
+        },
+        {
+          content_id: 'tmdb:118340',
+          content_type: 'movie',
+          name: 'Guardians of the Galaxy',
+          release_info: '2014-08-01',
+          added_at: 200
+        }
+      ])
+    }
+    if (url.pathname === '/api/trakt/enrich-metadata') {
+      return Response.json({
+        results: body.items.map((item: any) => ({
+          content_id: item.content_id,
+          tmdbId: '118340',
+          imdbId: 'tt2015381',
+          source: 'tmdb'
+        }))
+      })
+    }
+    throw new Error(`Unexpected request: ${url.pathname}`)
+  })
+
+  const result = await pullMediaBridge({
+    connection: nuvioConnection(),
+    scopes: { history: false, progress: false, library: true }
+  })
+
+  assert.equal(result.bundle.library.length, 1)
+  assert.equal(result.bundle.library[0].media.ids.imdb, 'tt2015381')
+  assert.equal(result.bundle.library[0].media.ids.tmdb, 118340)
+})
+
+test('uses the IMDb show ID when preflighting Trakt episodes against Nuvio metadata', async t => {
   let requestedMetadataId = ''
   t.mock.method(globalThis, 'fetch', async input => {
     const url = new URL(String(input))
@@ -762,10 +989,10 @@ test('uses the TMDB show ID when preflighting Trakt episodes against Nuvio metad
     }
     if (url.pathname.startsWith('/meta/series/')) {
       requestedMetadataId = decodeURIComponent(url.pathname.split('/').at(-1)!.replace(/\.json$/, ''))
-      if (requestedMetadataId !== 'tmdb:1399') return new Response(null, { status: 404 })
+      if (requestedMetadataId !== 'tt0944947') return new Response(null, { status: 404 })
       return Response.json({
         meta: {
-          videos: [{ id: 'tmdb:1399:1:2', season: 1, episode: 2, title: 'The Kingsroad' }]
+          videos: [{ id: 'tt0944947:1:2', season: 1, episode: 2, title: 'The Kingsroad' }]
         }
       })
     }
@@ -792,10 +1019,10 @@ test('uses the TMDB show ID when preflighting Trakt episodes against Nuvio metad
     { history: true, progress: false, library: false }
   )
 
-  assert.equal(requestedMetadataId, 'tmdb:1399')
+  assert.equal(requestedMetadataId, 'tt0944947')
   assert.equal(mappings.length, 1)
   assert.equal(mappings[0].mapping.status, 'mapped')
-  assert.equal(mappings[0].mapping.target?.videoId, 'tmdb:1399:1:2')
+  assert.equal(mappings[0].mapping.target?.videoId, 'tt0944947:1:2')
 })
 
 test('signs in to a Jellyfin server without keeping the password in the connection result', async t => {
@@ -1413,6 +1640,65 @@ test('treats a successful Stremio saved-title batch as confirmed', async t => {
   assert.equal(result.skipped?.library, 0)
   assert.deepEqual(result.confirmedScopes, ['library'])
   assert.deepEqual(result.issues, [])
+})
+
+test('keeps an existing Stremio TMDB key instead of creating an IMDb duplicate', async t => {
+  let changes: any[] = []
+  t.mock.method(globalThis, 'fetch', async (input, init) => {
+    const url = new URL(String(input), 'https://nuvio.wiki')
+    const body = init?.body ? JSON.parse(String(init.body)) : {}
+    if (url.pathname === '/api/datastoreGet') {
+      return Response.json({
+        result: [{
+          _id: 'tmdb:118340',
+          type: 'movie',
+          name: 'Guardians of the Galaxy',
+          removed: false,
+          temp: false,
+          state: {}
+        }]
+      })
+    }
+    if (url.pathname === '/api/trakt/enrich-metadata') {
+      return Response.json({
+        results: body.items.map((item: any) => ({
+          content_id: item.content_id,
+          tmdbId: '118340',
+          imdbId: 'tt2015381',
+          source: 'tmdb'
+        }))
+      })
+    }
+    if (url.pathname === '/meta/movie/tt2015381.json') {
+      return Response.json({ meta: { id: 'tt2015381', name: 'Guardians of the Galaxy' } })
+    }
+    if (url.pathname === '/api/datastorePut') {
+      changes = body.changes
+      return Response.json({ result: { success: true } })
+    }
+    throw new Error(`Unexpected request: ${url.pathname}`)
+  })
+
+  const bundle = createEmptyBundle()
+  bundle.library.push({
+    media: {
+      kind: 'movie',
+      ids: { imdb: 'tt2015381', tmdb: 118340 },
+      title: 'Guardians of the Galaxy'
+    },
+    addedAt: Date.UTC(2026, 6, 17),
+    lists: [{ service: 'trakt', kind: 'watchlist' }]
+  })
+
+  await pushMediaBridge({
+    connection: stremioConnection(),
+    bundle,
+    scopes: { history: false, progress: false, library: true }
+  })
+
+  assert.equal(changes.length, 1)
+  assert.equal(changes[0]._id, 'tmdb:118340')
+  assert.equal(changes.some(item => item._id === 'tt2015381'), false)
 })
 
 test('collapses replay events for Simkl watched state and confirms an accepted no-op', async t => {

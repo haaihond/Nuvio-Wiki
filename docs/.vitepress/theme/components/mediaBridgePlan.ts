@@ -302,11 +302,11 @@ function progressEquivalent(source: ProgressRecord, destination: ProgressRecord)
   return durationNear && Math.abs(sourcePosition - destinationPosition) <= 5_000
 }
 
-function needsNuvioLibraryTmdbUpgrade(source: ScopedRecord, destination: ScopedRecord): boolean {
-  const sourceTmdb = String(source.media.ids.tmdb ?? '').trim()
-  const destinationTmdb = String(destination.media.ids.tmdb ?? '').trim()
-  return Boolean(sourceTmdb)
-    && !destinationTmdb
+function needsNuvioLibraryImdbUpgrade(source: ScopedRecord, destination: ScopedRecord): boolean {
+  const sourceImdb = String(source.media.ids.imdb ?? '').trim().toLowerCase()
+  const destinationNativeId = String(destination.media.ids.stremio ?? '').trim().toLowerCase()
+  return /^tt\d+$/.test(sourceImdb)
+    && !/^tt\d+$/.test(destinationNativeId)
     && destination.source?.service === 'nuvio'
 }
 
@@ -317,7 +317,7 @@ function classifyRecord(
 ): Extract<PreviewOutcome, 'add' | 'update' | 'already-present'> {
   if (!destination) return 'add'
 
-  if (scope === 'library' && needsNuvioLibraryTmdbUpgrade(source, destination)) {
+  if (scope === 'library' && needsNuvioLibraryImdbUpgrade(source, destination)) {
     return 'update'
   }
 
@@ -448,6 +448,18 @@ export function planMediaBridgePreview(input: MediaBridgePlanInput): MediaBridge
     ? SERVICE_DEFINITIONS[input.destinationService].capabilities.historyWriteMode
     : 'state'
   const source = dedupeBundle(input.source)
+  const duplicateNuvioLibraryAliases = new Set<string>()
+  if (input.destinationService === 'nuvio') {
+    const aliasCounts = new Map<string, number>()
+    for (const record of input.destination.library) {
+      for (const alias of mediaAliasKeys(record.media)) {
+        aliasCounts.set(alias, (aliasCounts.get(alias) || 0) + 1)
+      }
+    }
+    for (const [alias, count] of aliasCounts) {
+      if (count > 1) duplicateNuvioLibraryAliases.add(alias)
+    }
+  }
   const destination = dedupeBundle(input.destination)
   if (historyWriteMode === 'state') {
     source.history = collapseHistoryToWatchedState(source.history)
@@ -535,7 +547,14 @@ export function planMediaBridgePreview(input: MediaBridgePlanInput): MediaBridge
             consumedHistoryEvents
           )
         : findDestinationRecord(destinationByScope[scope], mappedMedia, scope)
-      const outcome = classifyRecord(scope, plannedRecord, destinationRecord)
+      let outcome = classifyRecord(scope, plannedRecord, destinationRecord)
+      if (
+        scope === 'library'
+        && input.destinationService === 'nuvio'
+        && recordAliasKeys(mappedMedia).some(alias => duplicateNuvioLibraryAliases.has(alias))
+      ) {
+        outcome = 'update'
+      }
       // Existing destination records are authoritative. Provider ID, title, and
       // absolute-number translations must neither overwrite them nor count as a
       // remap. Only a newly added record with changed visible coordinates is a
