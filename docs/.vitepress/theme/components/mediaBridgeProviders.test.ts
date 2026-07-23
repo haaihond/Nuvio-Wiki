@@ -513,7 +513,13 @@ test('reads every Trakt history page and maps episodes through their parent show
             id: 102,
             type: 'episode',
             watched_at: '2026-07-18T13:00:00Z',
-            episode: { season: 1, number: 1, title: 'Pilot', ids: { trakt: 7001, tmdb: 9001 } },
+            episode: {
+              season: 1,
+              number: 1,
+              number_abs: 11,
+              title: 'Pilot',
+              ids: { trakt: 7001, tmdb: 9001 }
+            },
             show: {
               title: 'Paged Series',
               year: 2024,
@@ -524,7 +530,13 @@ test('reads every Trakt history page and maps episodes through their parent show
             id: 103,
             type: 'episode',
             watched_at: '2026-07-18T14:00:00Z',
-            episode: { season: 1, number: 2, title: 'Second', ids: { trakt: 7002, tmdb: 9002 } },
+            episode: {
+              season: 1,
+              number: 2,
+              number_abs: 12,
+              title: 'Second',
+              ids: { tmdb: 9002 }
+            },
             show: {
               title: 'Paged Series',
               year: 2024,
@@ -549,6 +561,8 @@ test('reads every Trakt history page and maps episodes through their parent show
   const episodes = result.bundle.history.filter(record => record.media.kind === 'series')
   assert.deepEqual(episodes.map(record => record.media.ids.tmdb), [501, 501])
   assert.deepEqual(episodes.map(record => record.media.episode), [2, 1])
+  assert.deepEqual(episodes.map(record => record.media.absoluteEpisode), [12, 11])
+  assert.deepEqual(episodes.map(record => record.media.videoId), ['tmdb:9002', 'trakt:7001'])
   assert.deepEqual(result.issues, [])
   assert.deepEqual(requestedPages, [
     '/users/me/history:1',
@@ -1023,6 +1037,141 @@ test('uses the IMDb show ID when preflighting Trakt episodes against Nuvio metad
   assert.equal(mappings.length, 1)
   assert.equal(mappings[0].mapping.status, 'mapped')
   assert.equal(mappings[0].mapping.target?.videoId, 'tt0944947:1:2')
+})
+
+test('keeps IMDb first but falls back to TMDB for Nuvio episode metadata', async t => {
+  const requestedMetadataIds: string[] = []
+  t.mock.method(globalThis, 'fetch', async input => {
+    const url = new URL(String(input))
+    if (url.pathname === '/rest/v1/addons') {
+      return Response.json([{
+        url: 'https://multi-id-meta.test/manifest.json',
+        enabled: true,
+        sort_order: 1,
+        profile_id: 3
+      }])
+    }
+    if (url.pathname === '/manifest.json') {
+      return Response.json({ resources: ['meta'] })
+    }
+    if (url.pathname.startsWith('/meta/')) {
+      const metadataId = decodeURIComponent(url.pathname.split('/').at(-1)!.replace(/\.json$/, ''))
+      requestedMetadataIds.push(metadataId)
+      if (metadataId !== 'tmdb:1399') return new Response(null, { status: 404 })
+      return Response.json({
+        meta: {
+          videos: [{ id: 'tmdb:1399:2:1', season: 2, episode: 1, title: 'The Kingsroad' }]
+        }
+      })
+    }
+    throw new Error(`Unexpected request: ${url}`)
+  })
+
+  const connection = nuvioConnection()
+  connection.accountId = 'multi-id-user'
+  connection.profileId = 3
+  const bundle = createEmptyBundle()
+  bundle.history.push({
+    media: {
+      kind: 'series',
+      ids: { imdb: 'tt0944947', tmdb: 1399, trakt: 1390 },
+      title: 'Game of Thrones',
+      season: 1,
+      episode: 2,
+      episodeTitle: 'The Kingsroad'
+    },
+    watchedAt: Date.UTC(2026, 6, 17),
+    playCount: 1
+  })
+
+  const mappings = await inspectDestinationMappings(
+    connection,
+    bundle,
+    { history: true, progress: false, library: false }
+  )
+
+  assert.equal(requestedMetadataIds[0], 'tt0944947')
+  assert.ok(requestedMetadataIds.indexOf('tmdb:1399') > requestedMetadataIds.indexOf('tt0944947'))
+  assert.equal(mappings[0].mapping.status, 'mapped')
+  assert.deepEqual(
+    mappings[0].mapping.target && [mappings[0].mapping.target.season, mappings[0].mapping.target.episode],
+    [2, 1]
+  )
+})
+
+test('prefers an IMDb-capable later addon over an earlier TMDB-only addon', async t => {
+  const requests: string[] = []
+  t.mock.method(globalThis, 'fetch', async input => {
+    const url = new URL(String(input))
+    if (url.pathname === '/rest/v1/addons') {
+      return Response.json([
+        {
+          url: 'https://tmdb-only-meta.test/manifest.json',
+          enabled: true,
+          sort_order: 1,
+          profile_id: 4
+        },
+        {
+          url: 'https://imdb-meta.test/manifest.json',
+          enabled: true,
+          sort_order: 2,
+          profile_id: 4
+        }
+      ])
+    }
+    if (url.pathname === '/manifest.json') {
+      return Response.json({ resources: ['meta'] })
+    }
+    if (url.pathname.startsWith('/meta/')) {
+      const metadataId = decodeURIComponent(url.pathname.split('/').at(-1)!.replace(/\.json$/, ''))
+      requests.push(`${url.host}:${metadataId}`)
+      if (url.host === 'imdb-meta.test' && metadataId === 'tt0944947') {
+        return Response.json({
+          meta: {
+            videos: [{ id: 'tt0944947:1:2', season: 1, episode: 2, title: 'The Kingsroad' }]
+          }
+        })
+      }
+      if (url.host === 'tmdb-only-meta.test' && metadataId === 'tmdb:1399') {
+        return Response.json({
+          meta: {
+            videos: [{ id: 'tmdb:1399:1:2', season: 1, episode: 2, title: 'The Kingsroad' }]
+          }
+        })
+      }
+      return new Response(null, { status: 404 })
+    }
+    throw new Error(`Unexpected request: ${url}`)
+  })
+
+  const connection = nuvioConnection()
+  connection.accountId = 'global-imdb-preference-user'
+  connection.profileId = 4
+  const bundle = createEmptyBundle()
+  bundle.history.push({
+    media: {
+      kind: 'series',
+      ids: { imdb: 'tt0944947', tmdb: 1399 },
+      title: 'Game of Thrones',
+      season: 1,
+      episode: 2,
+      episodeTitle: 'The Kingsroad'
+    },
+    watchedAt: Date.UTC(2026, 6, 17),
+    playCount: 1
+  })
+
+  const mappings = await inspectDestinationMappings(
+    connection,
+    bundle,
+    { history: true, progress: false, library: false }
+  )
+
+  assert.equal(mappings[0].mapping.status, 'mapped')
+  assert.equal(mappings[0].mapping.target?.videoId, 'tt0944947:1:2')
+  assert.ok(requests.includes('tmdb-only-meta.test:tt0944947'))
+  assert.ok(requests.includes('imdb-meta.test:tt0944947'))
+  assert.equal(requests.some(request => request.endsWith(':tmdb:1399')), false)
 })
 
 test('tries later Nuvio metadata addons before skipping an episode', async t => {

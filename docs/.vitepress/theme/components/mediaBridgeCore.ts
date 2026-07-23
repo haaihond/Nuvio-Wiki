@@ -933,13 +933,27 @@ export function remapEpisode(
   }
 
   if (sourceTitle) {
-    const result = uniqueCandidate(
-      'high',
-      targetEpisodes.filter(item => meaningfulEpisodeTitle(item.title) === sourceTitle),
-      'A unique normalized episode title matched.',
-      'The normalized episode title matches multiple destination episodes.'
-    )
-    if (result) return result
+    const titleMatches = targetEpisodes.filter(item => meaningfulEpisodeTitle(item.title) === sourceTitle)
+    if (titleMatches.length === 1) {
+      return mapped('high', titleMatches[0], 'A unique normalized episode title matched.')
+    }
+
+    // NuvioTV deliberately falls through to ordered-position mapping when a
+    // title is duplicated. Repeated titles such as "Part 1" should not block a
+    // deterministic index match between two complete episode lists.
+    if (titleMatches.length > 1) {
+      const orderedSource = sortedEpisodes(sourceEpisodes)
+      const sourceIndex = orderedSource.findIndex(item => episodeSignature(item) === episodeSignature(source))
+      const ordinalCandidate = sourceIndex >= 0 ? sortedEpisodes(targetEpisodes)[sourceIndex] : undefined
+      if (ordinalCandidate) {
+        return mapped(
+          'low',
+          ordinalCandidate,
+          'The duplicated episode title was resolved by its position in the ordered episode list.'
+        )
+      }
+      return ambiguous('high', titleMatches, 'The normalized episode title matches multiple destination episodes.')
+    }
   }
 
   if (validEpisode(source.absoluteEpisode)) {

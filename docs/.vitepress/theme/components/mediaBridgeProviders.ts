@@ -2246,6 +2246,16 @@ function mediaFromTrakt(value: any, kind: 'movie' | 'series'): MediaRef {
   }
 }
 
+function traktEpisodeVideoId(value: any): string | undefined {
+  const traktId = Number(value?.ids?.trakt)
+  if (Number.isSafeInteger(traktId) && traktId > 0) return `trakt:${traktId}`
+  const tvdbId = Number(value?.ids?.tvdb)
+  if (Number.isSafeInteger(tvdbId) && tvdbId > 0) return `tvdb:${tvdbId}`
+  const tmdbId = Number(value?.ids?.tmdb)
+  if (Number.isSafeInteger(tmdbId) && tmdbId > 0) return `tmdb:${tmdbId}`
+  return undefined
+}
+
 async function pullTrakt(options: PullOptions): Promise<PullResult> {
   const { connection, scopes, log } = options
   const bundle = createEmptyBundle()
@@ -2302,7 +2312,9 @@ async function pullTrakt(options: PullOptions): Promise<PullResult> {
             ...mediaFromTrakt(item.show, 'series'),
             season,
             episode,
-            episodeTitle: item.episode.title
+            absoluteEpisode: Number(item.episode.number_abs) || undefined,
+            episodeTitle: item.episode.title,
+            videoId: traktEpisodeVideoId(item.episode)
           },
           watchedAt: asEpochMs(item.watched_at),
           eventId: typeof item.id === 'string' || typeof item.id === 'number' ? item.id : undefined,
@@ -2332,7 +2344,9 @@ async function pullTrakt(options: PullOptions): Promise<PullResult> {
       if (!isMovie) {
         media.season = Number(item.episode?.season)
         media.episode = Number(item.episode?.number)
+        media.absoluteEpisode = Number(item.episode?.number_abs) || undefined
         media.episodeTitle = item.episode?.title
+        media.videoId = traktEpisodeVideoId(item.episode)
       }
       const runtimeMinutes = positiveNumber(item.movie?.runtime || item.episode?.runtime)
       const normalizedPercentage = Math.min(100, percentage)
@@ -4091,13 +4105,23 @@ async function nuvioTargetEpisodes(
     nuvioEpisodeCache.set(key, (async () => {
       const addons = await nuvioMetadataAddons(connection)
       if (!addons.length) return []
-      const candidates = [
-        contentId,
-        media.ids.imdb,
-        contentId.replace(/^(tmdb|tvdb|trakt|simkl):/i, '')
-      ].filter(Boolean).map(String)
-      for (const addon of addons) {
-        for (const candidate of [...new Set(candidates)]) {
+      const candidates: string[] = []
+      const addCandidate = (value: unknown) => {
+        const normalized = String(value ?? '').trim()
+        if (normalized && !candidates.includes(normalized)) candidates.push(normalized)
+      }
+      for (const id of nuvioContentIds(media)) {
+        // nuvioContentIds is deliberately IMDb-first. Keep the canonical ID
+        // first, then try the bare provider value for addons that do not accept
+        // namespaced TMDB/TVDB/Trakt/Simkl IDs.
+        addCandidate(id)
+        addCandidate(id.replace(/^(tmdb|tvdb|trakt|simkl):/i, ''))
+      }
+      // Try the preferred ID across every addon before falling back to the next
+      // namespace. This keeps IMDb canonical even when an earlier addon could
+      // answer only for TMDB while a later addon supports IMDb.
+      for (const candidate of candidates) {
+        for (const addon of addons) {
           for (const type of ['series', 'tv']) {
             try {
               const { data } = await requestBridgeJson(
@@ -4136,19 +4160,12 @@ async function traktTargetEpisodes(
           const seasonNumber = Number(season.number)
           const episodeNumber = Number(episode.number)
           if (!Number.isInteger(seasonNumber) || !Number.isInteger(episodeNumber)) continue
-          const traktId = Number(episode.ids?.trakt)
-          const tvdbId = Number(episode.ids?.tvdb)
-          const videoId = Number.isSafeInteger(traktId) && traktId > 0
-            ? `trakt:${traktId}`
-            : Number.isSafeInteger(tvdbId) && tvdbId > 0
-              ? `tvdb:${tvdbId}`
-              : undefined
           episodes.push({
             season: seasonNumber,
             episode: episodeNumber,
             absoluteEpisode: Number(episode.number_abs) || undefined,
             title: episode.title,
-            videoId
+            videoId: traktEpisodeVideoId(episode)
           })
         }
       }

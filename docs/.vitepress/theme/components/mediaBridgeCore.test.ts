@@ -339,8 +339,10 @@ test('maps an episode by ordered position after stronger matches fail', () => {
       { season: 2, episode: 2, title: 'Finale' }
     ]
   )
-  assert.equal(duplicateTitle.status, 'ambiguous')
-  assert.equal(duplicateTitle.candidates.length, 2)
+  assert.equal(duplicateTitle.status, 'mapped')
+  assert.equal(duplicateTitle.confidence, 'low')
+  assert.equal(duplicateTitle.target?.episode, 1)
+  assert.match(duplicateTitle.reason, /duplicated episode title/)
 
   const ordinalOnly = remapEpisode(
     { season: 1, episode: 2, absoluteEpisode: 10 },
