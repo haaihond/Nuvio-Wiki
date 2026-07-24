@@ -141,7 +141,9 @@ const copy = computed(() => isDutch.value ? {
   setupStopped: 'Instellen gestopt',
   noChanges: 'Er zijn geen nieuwe of nieuwere items om te synchroniseren.',
   authorizeSeparate: 'Autoriseer voor deze kant een afzonderlijke sessie:',
-  traktZipHelp: 'Of gebruik het .zip-bestand uit de Trakt-gegevensexport. Het bestand wordt alleen lokaal in je browser gelezen.',
+  traktZipHelpBefore: 'Of gebruik het .zip-bestand uit je ',
+  traktZipHelpLink: 'Trakt-gegevensexport',
+  traktZipHelpAfter: '. Het bestand wordt alleen lokaal in je browser gelezen.',
   traktZipChoose: 'Trakt ZIP kiezen',
   stremioDevice: 'Gebruik de apparaatkoppeling van Stremio, zodat deze pagina je wachtwoord nooit ontvangt.',
   plexDevice: 'Meld je aan bij Plex en kies daarna de mediaserver die je wilt synchroniseren.',
@@ -247,7 +249,9 @@ const copy = computed(() => isDutch.value ? {
   setupStopped: 'Setup stopped',
   noChanges: 'There are no new or newer items to sync.',
   authorizeSeparate: 'Authorize a separate session for this side:',
-  traktZipHelp: 'Or use the .zip file from your Trakt data export. The file is read only in your browser.',
+  traktZipHelpBefore: 'Or use the .zip file from your ',
+  traktZipHelpLink: 'Trakt data export',
+  traktZipHelpAfter: '. The file is read only in your browser.',
   traktZipChoose: 'Choose Trakt ZIP',
   stremioDevice: 'Use Stremio’s device link so this page never receives your password.',
   plexDevice: 'Sign in with Plex, then choose the media server you want to sync.',
@@ -1217,7 +1221,14 @@ onBeforeUnmount(() => {
                 v-if="slot === 'source' && selectedService[slot] === 'trakt'"
                 class="trakt-export-import"
               >
-                <p>{{ copy.traktZipHelp }}</p>
+                <p>
+                  {{ copy.traktZipHelpBefore }}<a
+                    href="https://app.trakt.tv/settings/data?mode=media"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="trakt-export-link"
+                  >{{ copy.traktZipHelpLink }}</a>{{ copy.traktZipHelpAfter }}
+                </p>
                 <label class="secondary-button connect-button file-button">
                   {{ copy.traktZipChoose }}
                   <input
@@ -1799,7 +1810,18 @@ onBeforeUnmount(() => {
   padding-top: 14px;
   border-top: 1px solid var(--vp-c-divider);
 }
+.trakt-export-link {
+  color: var(--vp-c-brand-1);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.trakt-export-link:hover {
+  color: var(--vp-c-brand-2, var(--vp-c-brand-1));
+}
 .file-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   position: relative;
   overflow: hidden;
   align-self: flex-start;
