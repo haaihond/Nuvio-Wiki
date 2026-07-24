@@ -891,6 +891,43 @@ test('writes IMDb-first Nuvio IDs while retaining TMDB for metadata enrichment',
   assert.deepEqual(result.issues, [])
 })
 
+test('converts percentage-only progress to Nuvio elapsed time using metadata runtime', async t => {
+  let progressEntries: any[] = []
+  t.mock.method(globalThis, 'fetch', async (input, init) => {
+    const url = new URL(String(input), 'https://nuvio.wiki')
+    const body = JSON.parse(String(init?.body || '{}'))
+    if (url.pathname === '/api/trakt/enrich-metadata') {
+      return Response.json({
+        results: body.items.map((item: any) => ({
+          content_id: item.content_id,
+          imdbId: item._ids.imdb,
+          runtimeMs: 7_200_000,
+          source: 'cinemeta'
+        }))
+      })
+    }
+    if (url.pathname === '/rest/v1/rpc/sync_push_watch_progress') {
+      progressEntries = body.p_entries
+      return Response.json(null)
+    }
+    throw new Error(`Unexpected request: ${url.pathname}`)
+  })
+
+  const bundle = createEmptyBundle()
+  bundle.progress.push(movieProgress(50))
+  const result = await pushMediaBridge({
+    connection: nuvioConnection(),
+    bundle,
+    scopes: { history: false, progress: true, library: false }
+  })
+
+  assert.equal(progressEntries.length, 1)
+  assert.equal(progressEntries[0].position, 3_600_000)
+  assert.equal(progressEntries[0].duration, 7_200_000)
+  assert.equal(result.written.progress, 1)
+  assert.deepEqual(result.issues, [])
+})
+
 test('resolves a TMDB-only source to the corresponding IMDb ID before writing Nuvio', async t => {
   let metadataItems: any[] = []
   let watchedItems: any[] = []
@@ -1768,6 +1805,57 @@ test('stops the Simkl progress phase and skips the remainder when its budget exp
   assert.equal(result.issues.length, 1)
   assert.equal(result.issues[0].status, 'note')
   assert.match(result.issues[0].reason, /stopped after 30 seconds; 2 resume points were skipped/)
+})
+
+test('converts percentage-only progress to Stremio elapsed time using metadata runtime', async t => {
+  let changes: any[] = []
+  t.mock.method(globalThis, 'fetch', async (input, init) => {
+    const url = new URL(String(input), 'https://nuvio.wiki')
+    const body = init?.body ? JSON.parse(String(init.body)) : {}
+    if (url.pathname === '/api/datastoreGet') {
+      return Response.json({ result: [] })
+    }
+    if (url.pathname === '/api/trakt/enrich-metadata') {
+      return Response.json({
+        results: body.items.map((item: any) => ({
+          content_id: item.content_id,
+          imdbId: item._ids.imdb,
+          runtimeMs: 5_400_000,
+          source: 'cinemeta'
+        }))
+      })
+    }
+    if (url.pathname === '/meta/movie/tt7654321.json') {
+      return Response.json({ meta: { id: 'tt7654321', name: 'Runtime conversion' } })
+    }
+    if (url.pathname === '/api/datastorePut') {
+      changes = body.changes
+      return Response.json({ result: { success: true } })
+    }
+    throw new Error(`Unexpected request: ${url.pathname}`)
+  })
+
+  const bundle = createEmptyBundle()
+  bundle.progress.push({
+    media: {
+      kind: 'movie',
+      ids: { imdb: 'tt7654321' },
+      title: 'Runtime conversion'
+    },
+    percentage: 40,
+    updatedAt: Date.UTC(2026, 6, 17)
+  })
+  const result = await pushMediaBridge({
+    connection: stremioConnection(),
+    bundle,
+    scopes: { history: false, progress: true, library: false }
+  })
+
+  assert.equal(changes.length, 1)
+  assert.equal(changes[0].state.timeOffset, 2_160_000)
+  assert.equal(changes[0].state.duration, 5_400_000)
+  assert.equal(result.written.progress, 1)
+  assert.deepEqual(result.issues, [])
 })
 
 test('confirms successful Stremio batches and explains superseded series resume points', async t => {

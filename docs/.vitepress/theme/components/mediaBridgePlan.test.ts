@@ -79,20 +79,20 @@ test('classifies add, update, and already-present records without downgrading pr
 
   source.history.push(
     { media: movie('tt101', 'New'), watchedAt: 100 },
-    { media: movie('tt102', 'Newer'), watchedAt: 300 },
+    { media: movie('tt102', 'Newer'), watchedAt: 600_001 },
     { media: movie('tt103', 'Existing'), watchedAt: 100 }
   )
   destination.history.push(
-    { media: movie('tt102', 'Newer'), watchedAt: 200 },
+    { media: movie('tt102', 'Newer'), watchedAt: 300_000 },
     { media: movie('tt103', 'Existing'), watchedAt: 100 }
   )
 
   source.progress.push(
-    { media: movie('tt201', 'Changed'), positionMs: 80_000, durationMs: 100_000, updatedAt: 400 },
+    { media: movie('tt201', 'Changed'), positionMs: 800_000, durationMs: 1_000_000, updatedAt: 400 },
     { media: movie('tt202', 'Destination newer'), positionMs: 20_000, durationMs: 100_000, updatedAt: 100 }
   )
   destination.progress.push(
-    { media: movie('tt201', 'Changed'), positionMs: 50_000, durationMs: 100_000, updatedAt: 400 },
+    { media: movie('tt201', 'Changed'), positionMs: 200_000, durationMs: 1_000_000, updatedAt: 400 },
     { media: movie('tt202', 'Destination newer'), positionMs: 70_000, durationMs: 100_000, updatedAt: 500 }
   )
 
@@ -106,19 +106,19 @@ test('classifies add, update, and already-present records without downgrading pr
   assert.equal(plan.transfer.progress.length, 1)
   assert.equal(plan.rows.find(row => row.title === 'Destination newer')?.outcome, 'already-present')
   const historyUpdate = plan.rows.find(row => row.title === 'Newer')
-  assert.equal(historyUpdate?.detail, 'The source watched timestamp is newer.')
+  assert.equal(historyUpdate?.detail, 'The source watched timestamp is more than five minutes newer.')
   assert.match(
     historyUpdate?.diagnostics.find(diagnostic => diagnostic.key === 'changes')?.value || '',
-    /watchedAt:.*200 ms.*→.*300 ms/
+    /watchedAt:.*300000 ms.*→.*600001 ms/
   )
   const progressUpdate = plan.rows.find(row => row.title === 'Changed')
   assert.equal(
     progressUpdate?.detail,
-    'The source playback position differs beyond the sync tolerance.'
+    'The source playback position differs beyond the five-minute elapsed-time tolerance.'
   )
   assert.match(
     progressUpdate?.diagnostics.find(diagnostic => diagnostic.key === 'changes')?.value || '',
-    /progress: 50\.00% → 80\.00%.*positionMs: 50000 → 80000/
+    /progress: 20\.00% → 80\.00%.*positionMs: 200000 → 800000/
   )
 })
 
@@ -133,6 +133,61 @@ test('keeps collapsed history idempotent when only provider replay counts differ
   assert.equal(plan.stats.alreadyPresent, 1)
   assert.equal(plan.stats.update, 0)
   assert.equal(plan.transfer.history.length, 0)
+})
+
+test('tolerates watched timestamps up to five minutes apart for state destinations', () => {
+  const withinToleranceSource = createEmptyBundle()
+  const withinToleranceDestination = createEmptyBundle()
+  const breakingBad = episode('tt0903747', 'Breaking Bad', 1, 3)
+  withinToleranceSource.history.push({
+    media: breakingBad,
+    watchedAt: 1_783_507_193_000
+  })
+  withinToleranceDestination.history.push({
+    media: breakingBad,
+    watchedAt: 1_783_507_140_000
+  })
+
+  const withinTolerance = planMediaBridgePreview({
+    source: withinToleranceSource,
+    destination: withinToleranceDestination,
+    destinationService: 'stremio',
+    scopes: ALL_SCOPES
+  })
+
+  assert.equal(withinTolerance.stats.alreadyPresent, 1)
+  assert.equal(withinTolerance.stats.update, 0)
+  assert.equal(withinTolerance.transfer.history.length, 0)
+
+  const boundarySource = createEmptyBundle()
+  const boundaryDestination = createEmptyBundle()
+  boundarySource.history.push({ media: breakingBad, watchedAt: 1_300_000 })
+  boundaryDestination.history.push({ media: breakingBad, watchedAt: 1_000_000 })
+
+  const exactBoundary = planMediaBridgePreview({
+    source: boundarySource,
+    destination: boundaryDestination,
+    destinationService: 'nuvio',
+    scopes: ALL_SCOPES
+  })
+
+  assert.equal(exactBoundary.stats.alreadyPresent, 1)
+  assert.equal(exactBoundary.stats.update, 0)
+
+  boundarySource.history[0].watchedAt += 1
+  const beyondBoundary = planMediaBridgePreview({
+    source: boundarySource,
+    destination: boundaryDestination,
+    destinationService: 'nuvio',
+    scopes: ALL_SCOPES
+  })
+
+  assert.equal(beyondBoundary.stats.update, 1)
+  assert.equal(beyondBoundary.transfer.history.length, 1)
+  assert.equal(
+    beyondBoundary.rows[0].detail,
+    'The source watched timestamp is more than five minutes newer.'
+  )
 })
 
 test('preserves replay events for Trakt and matches them as a timestamped multiset', () => {
@@ -163,6 +218,25 @@ test('preserves replay events for Trakt and matches them as a timestamped multis
   assert.equal(plan.transfer.history.length, 1)
   assert.equal(plan.transfer.history[0].eventId, 1003)
   assert.equal(plan.transfer.history[0].watchedAt, 200)
+})
+
+test('does not apply the state timestamp tolerance to Trakt history events', () => {
+  const source = createEmptyBundle()
+  const destination = createEmptyBundle()
+  const replay = movie('tt106', 'Exact history events')
+  source.history.push({ media: replay, watchedAt: 153_000, eventId: 1001 })
+  destination.history.push({ media: replay, watchedAt: 100_000, eventId: 2001 })
+
+  const plan = planMediaBridgePreview({
+    source,
+    destination,
+    destinationService: 'trakt',
+    scopes: ALL_SCOPES
+  })
+
+  assert.equal(plan.stats.add, 1)
+  assert.equal(plan.stats.alreadyPresent, 0)
+  assert.equal(plan.transfer.history[0].watchedAt, 153_000)
 })
 
 test('matches history, progress, and library through shared secondary IDs', () => {
@@ -236,8 +310,8 @@ test('only updates Continue Watching state across provider ID differences and pr
     },
     {
       media: { kind: 'movie', ids: { imdb: 'tt8102' }, title: 'Changed CW item', year: 2024 },
-      positionMs: 80_000,
-      durationMs: 100_000,
+      positionMs: 800_000,
+      durationMs: 1_000_000,
       updatedAt: 500
     }
   )
@@ -250,8 +324,8 @@ test('only updates Continue Watching state across provider ID differences and pr
     },
     {
       media: { kind: 'movie', ids: { tmdb: 9102 }, title: 'Changed CW item', year: 2024 },
-      positionMs: 20_000,
-      durationMs: 100_000,
+      positionMs: 200_000,
+      durationMs: 1_000_000,
       updatedAt: 400
     }
   )
@@ -263,7 +337,7 @@ test('only updates Continue Watching state across provider ID differences and pr
   assert.equal(plan.stats.update, 1)
   assert.equal(plan.transfer.progress.length, 1)
   assert.deepEqual(plan.transfer.progress[0].media.ids, { tmdb: 9102 })
-  assert.equal(plan.transfer.progress[0].positionMs, 80_000)
+  assert.equal(plan.transfer.progress[0].positionMs, 800_000)
   assert.deepEqual(source.progress[1].media.ids, { imdb: 'tt8102' })
   assert.deepEqual(destination.progress[1].media.ids, { tmdb: 9102 })
 })
@@ -422,10 +496,10 @@ test('tolerates progress round-trip noise but never overwrites newer destination
     })
   }
 
-  addProgressPair('tt7101', 50_000, 100_000, 500, 50_800, 100_000, 400) // 0.8 percentage points
-  addProgressPair('tt7102', 50_000, 200_000, 500, 54_500, 204_000, 400) // <=5 seconds, near duration
-  addProgressPair('tt7103', 10_000, 100_000, 100, 90_000, 100_000, 900) // destination is newer
-  addProgressPair('tt7104', 10_000, 100_000, 500, 30_000, 100_000, 500) // meaningful difference
+  addProgressPair('tt7101', 3_000_000, 6_000_000, 500, 3_048_000, 6_000_000, 400) // 48 seconds
+  addProgressPair('tt7102', 3_000_000, 6_000_000, 500, 3_299_999, 6_120_000, 400) // just under five minutes
+  addProgressPair('tt7103', 600_000, 6_000_000, 100, 5_400_000, 6_000_000, 900) // destination is newer
+  addProgressPair('tt7104', 600_000, 6_000_000, 500, 900_001, 6_000_000, 500) // just over five minutes
 
   const plan = planMediaBridgePreview({ source, destination, scopes: ALL_SCOPES })
   assert.equal(plan.stats.source, 4)
@@ -459,6 +533,62 @@ test('compares percent-only progress and preserves it in transfer records', () =
   assert.equal(plan.transfer.progress[0].percentage, 75)
   assert.equal(plan.transfer.progress[0].positionMs, undefined)
   assert.equal(plan.transfer.progress[0].durationMs, undefined)
+})
+
+test('materializes percentage-only progress for Nuvio and Stremio elapsed-time writes', () => {
+  for (const destinationService of ['nuvio', 'stremio'] as const) {
+    const source = createEmptyBundle()
+    const destination = createEmptyBundle()
+    const media = movie('tt7204', 'Percentage conversion')
+    source.progress.push({ media, percentage: 75, updatedAt: 500 })
+    destination.progress.push({
+      media,
+      positionMs: 1_200_000,
+      durationMs: 7_200_000,
+      updatedAt: 400
+    })
+
+    const plan = planMediaBridgePreview({
+      source,
+      destination,
+      destinationService,
+      scopes: ALL_SCOPES
+    })
+
+    assert.equal(plan.stats.update, 1)
+    assert.equal(plan.transfer.progress.length, 1)
+    assert.equal(plan.transfer.progress[0].positionMs, 5_400_000)
+    assert.equal(plan.transfer.progress[0].durationMs, 7_200_000)
+    assert.equal(plan.transfer.progress[0].percentage, 75)
+  }
+})
+
+test('requires more than five minutes of elapsed progress difference before updating', () => {
+  const source = createEmptyBundle()
+  const destination = createEmptyBundle()
+  const exactBoundary = movie('tt7205', 'Exact progress boundary')
+  const beyondBoundary = movie('tt7206', 'Beyond progress boundary')
+
+  source.progress.push(
+    { media: exactBoundary, positionMs: 1_300_000, durationMs: 7_200_000, updatedAt: 500 },
+    { media: beyondBoundary, positionMs: 1_300_001, durationMs: 7_200_000, updatedAt: 500 }
+  )
+  destination.progress.push(
+    { media: exactBoundary, positionMs: 1_000_000, durationMs: 7_200_000, updatedAt: 400 },
+    { media: beyondBoundary, positionMs: 1_000_000, durationMs: 7_200_000, updatedAt: 400 }
+  )
+
+  const plan = planMediaBridgePreview({
+    source,
+    destination,
+    destinationService: 'nuvio',
+    scopes: ALL_SCOPES
+  })
+
+  assert.equal(plan.stats.alreadyPresent, 1)
+  assert.equal(plan.stats.update, 1)
+  assert.equal(plan.transfer.progress.length, 1)
+  assert.equal(plan.transfer.progress[0].media.ids.imdb, 'tt7206')
 })
 
 test('updates existing library records when source list provenance is missing at destination', () => {
@@ -708,8 +838,8 @@ test('treats an existing destination episode as authoritative', () => {
     episodeTitle: 'The Wolf and the Lion',
     videoId: 'destination:episode-5'
   }
-  source.history.push({ media: sourceMedia, watchedAt: 500 })
-  destination.history.push({ media: destinationMedia, watchedAt: 100 })
+  source.history.push({ media: sourceMedia, watchedAt: 500_000 })
+  destination.history.push({ media: destinationMedia, watchedAt: 100_000 })
 
   const plan = planMediaBridgePreview({
     source,
@@ -743,7 +873,7 @@ test('treats an existing destination episode as authoritative', () => {
   assert.equal(plan.rows[0].remapped, false)
   assert.equal(plan.rows[0].outcomeLabel, 'Update destination')
   assert.equal(plan.rows[0].title, 'Game of Thrones')
-  assert.equal(plan.rows[0].detail, 'The source watched timestamp is newer.')
+  assert.equal(plan.rows[0].detail, 'The source watched timestamp is more than five minutes newer.')
   assert.deepEqual(
     plan.rows[0].diagnostics.map(diagnostic => diagnostic.key),
     ['updateReason', 'sourceState', 'destinationState', 'changes', 'sourceIds', 'destinationIds']

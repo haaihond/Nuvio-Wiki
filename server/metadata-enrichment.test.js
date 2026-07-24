@@ -71,6 +71,7 @@ test('deduplicates repeated IDs and writes all aliases in one batch', async () =
         description: 'Description',
         releaseDate: '2020-01-01',
         imdbRating: 8.4,
+        runtimeMs: 7_200_000,
         genres: ['Drama'],
         source: 'tmdb',
         resolvedTmdbId: item.tmdbId,
@@ -92,6 +93,7 @@ test('deduplicates repeated IDs and writes all aliases in one batch', async () =
   assert.equal(output.results[0].backgroundUrl, 'background');
   assert.equal(output.results[0].description, 'Description');
   assert.equal(output.results[0].imdbRating, 8.4);
+  assert.equal(output.results[0].runtimeMs, 7_200_000);
   assert.deepEqual(output.results[0].genres, ['Drama']);
   assert.equal(output.results[0].tmdbId, '99');
   assert.equal(output.results[0].imdbId, 'tt0000099');

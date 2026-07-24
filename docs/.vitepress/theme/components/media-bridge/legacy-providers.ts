@@ -110,6 +110,8 @@ export interface TraktCredentials {
   clientId: string
   tokens: TraktTokens
   refreshUrl: string
+  archiveBundle?: CanonicalBundle
+  archiveWarnings?: string[]
 }
 
 export interface SimklCredentials {
@@ -290,11 +292,23 @@ function progressPercentage(record: ProgressRecord): number {
   return Number.isFinite(explicit) && explicit > 0 ? Math.min(100, explicit) : 0
 }
 
-function absoluteProgress(record: ProgressRecord): { positionMs: number; durationMs: number } | null {
+function absoluteProgress(
+  record: ProgressRecord,
+  fallbackDurationMs = 0
+): { positionMs: number; durationMs: number } | null {
   const positionMs = Number(record.positionMs)
   const durationMs = Number(record.durationMs)
-  if (!Number.isFinite(positionMs) || !Number.isFinite(durationMs) || positionMs <= 0 || durationMs <= 0) return null
-  return { positionMs, durationMs }
+  if (Number.isFinite(positionMs) && Number.isFinite(durationMs) && positionMs > 0 && durationMs > 0) {
+    return { positionMs, durationMs }
+  }
+
+  const percentage = progressPercentage(record)
+  const fallback = Number(fallbackDurationMs)
+  if (!percentage || !Number.isFinite(fallback) || fallback <= 0) return null
+  return {
+    positionMs: Math.round(fallback * percentage / 100),
+    durationMs: fallback
+  }
 }
 
 function externalIdNamespace(value: unknown): string | null {
@@ -2167,6 +2181,25 @@ function traktEpisodeVideoId(value: any): string | undefined {
 
 async function pullTrakt(options: PullOptions): Promise<PullResult> {
   const { connection, scopes, log } = options
+  if (connection.credentials.service === 'trakt' && connection.credentials.archiveBundle) {
+    logTo(log, 'Reading watch data from the local Trakt export ZIP...')
+    const archive = connection.credentials.archiveBundle
+    const firstScope = (['history', 'progress', 'library'] as const).find(scope => scopes[scope])
+    return {
+      bundle: dedupeBundle({
+        history: scopes.history ? archive.history : [],
+        progress: scopes.progress ? archive.progress : [],
+        library: scopes.library ? archive.library : []
+      }),
+      issues: firstScope
+        ? (connection.credentials.archiveWarnings || []).map(reason => ({
+            scope: firstScope,
+            status: 'note' as const,
+            reason
+          }))
+        : []
+    }
+  }
   const bundle = createEmptyBundle()
   const issues: BridgeIssue[] = []
   const provenance = sourceOf(connection)
@@ -2713,6 +2746,7 @@ interface BridgeMetadataResult {
   description?: string | null
   releaseDate?: string | null
   imdbRating?: number | null
+  runtimeMs?: number | null
   genres?: string[]
   retryable?: boolean
 }
@@ -2929,7 +2963,10 @@ async function pushNuvio(options: PushOptions): Promise<PushResult> {
       .map(record => record.media),
     ...(scopes.progress
       ? bundle.progress
-        .filter(record => !/^tt\d+$/i.test(String(record.media.ids.imdb || '')))
+        .filter(record => (
+          !/^tt\d+$/i.test(String(record.media.ids.imdb || ''))
+          || !absoluteProgress(record)
+        ))
         .map(record => record.media)
       : []),
     ...(scopes.library ? bundle.library.map(record => record.media) : [])
@@ -2986,9 +3023,9 @@ async function pushNuvio(options: PushOptions): Promise<PushResult> {
     for (const record of bundle.progress) {
       const metadata = metadataByMedia.get(record.media)
       const contentId = resolvedNuvioContentId(record.media, metadata)
-      const absolute = absoluteProgress(record)
+      const absolute = absoluteProgress(record, positiveNumber(metadata?.runtimeMs))
       if (!contentId || !absolute) {
-        skip({ scope: 'progress', status: 'unresolved', media: record.media, reason: 'Nuvio progress needs a supported ID plus an absolute position and duration; percentage-only progress was skipped.' })
+        skip({ scope: 'progress', status: 'unresolved', media: record.media, reason: 'Nuvio progress needs a supported ID and a reliable runtime to convert this percentage.' })
         continue
       }
       if (record.media.kind === 'series' && (!Number.isInteger(record.media.season) || !Number.isInteger(record.media.episode))) {
@@ -3811,6 +3848,14 @@ async function pushStremio(options: PushOptions): Promise<PushResult> {
     currentMedia.filter(media => !/^tt\d+$/i.test(String(media.ids.imdb || ''))),
     log
   )
+  const progressRuntimeMetadata = scopes.progress
+    ? await loadBridgeMetadata(
+        bundle.progress
+          .filter(record => !absoluteProgress(record))
+          .map(record => record.media),
+        log
+      )
+    : new Map<MediaRef, BridgeMetadataResult>()
   const currentByAlias = new Map<string, any>()
   currentItems.forEach((item: any, index: number) => {
     const media = withResolvedExternalIds(currentMedia[index], currentMetadata.get(currentMedia[index]))
@@ -3844,18 +3889,7 @@ async function pushStremio(options: PushOptions): Promise<PushResult> {
     collapseHistoryToWatchedState(bundle.history).forEach(record => addRecord('history', record))
   }
   if (scopes.progress) {
-    bundle.progress.forEach(record => {
-      if (!absoluteProgress(record)) {
-        issues.push({
-          scope: 'progress',
-          status: 'unresolved',
-          media: record.media,
-          reason: 'Stremio progress needs an absolute position and duration; percentage-only progress was skipped.'
-        })
-        return
-      }
-      addRecord('progress', record)
-    })
+    bundle.progress.forEach(record => addRecord('progress', record))
   }
   if (scopes.library) bundle.library.forEach(record => addRecord('library', record))
 
@@ -3902,9 +3936,13 @@ async function pushStremio(options: PushOptions): Promise<PushResult> {
       }
       if (group.progress.length) {
         const latest = [...group.progress].sort((a, b) => b.updatedAt - a.updatedAt)[0]
-        const absolute = absoluteProgress(latest)
+        const absolute = absoluteProgress(
+          latest,
+          positiveNumber(existing?.state?.duration)
+            || positiveNumber(progressRuntimeMetadata.get(latest.media)?.runtimeMs)
+        )
         if (!absolute) {
-          issues.push({ scope: 'progress', status: 'unresolved', media: latest.media, reason: 'Stremio requires an absolute position and duration.' })
+          issues.push({ scope: 'progress', status: 'unresolved', media: latest.media, reason: 'Stremio needs a reliable runtime to convert this percentage.' })
         } else {
           item.state.timeOffset = Math.round(absolute.positionMs)
           item.state.duration = Math.round(absolute.durationMs)
@@ -3972,9 +4010,13 @@ async function pushStremio(options: PushOptions): Promise<PushResult> {
       if (mapping.status !== 'mapped') {
         issues.push({ scope: 'progress', status: mapping.status, media: latest.media, reason: mapping.reason })
       } else {
-        const absolute = absoluteProgress(latest)
+        const absolute = absoluteProgress(
+          latest,
+          positiveNumber(existing?.state?.duration)
+            || positiveNumber(progressRuntimeMetadata.get(latest.media)?.runtimeMs)
+        )
         if (!absolute) {
-          issues.push({ scope: 'progress', status: 'unresolved', media: latest.media, reason: 'Stremio requires an absolute position and duration.' })
+          issues.push({ scope: 'progress', status: 'unresolved', media: latest.media, reason: 'Stremio needs a reliable runtime to convert this percentage.' })
         } else {
           item.state.timeOffset = Math.round(absolute.positionMs)
           item.state.duration = Math.round(absolute.durationMs)

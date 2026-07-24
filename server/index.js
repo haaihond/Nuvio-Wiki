@@ -1313,6 +1313,16 @@ async function fetchTmdb(path, queryParams = {}, signal) {
   });
 }
 
+function runtimeMinutesToMs(value) {
+  const candidates = Array.isArray(value) ? value : [value];
+  for (const candidate of candidates) {
+    const match = String(candidate ?? '').match(/\d+(?:\.\d+)?/);
+    const minutes = match ? Number(match[0]) : NaN;
+    if (Number.isFinite(minutes) && minutes > 0) return Math.round(minutes * 60_000);
+  }
+  return null;
+}
+
 async function fetchCinemeta(type, imdbId, signal) {
   const cinemetaType = type === 'movie' ? 'movie' : 'series';
   const url = `https://v3-cinemeta.strem.io/meta/${cinemetaType}/${encodeURIComponent(imdbId)}.json`;
@@ -1331,6 +1341,7 @@ async function fetchCinemeta(type, imdbId, signal) {
     description: meta?.description || null,
     releaseDate: meta?.released || null,
     imdbRating: Number.isFinite(Number(meta?.imdbRating)) ? Number(meta.imdbRating) : null,
+    runtimeMs: runtimeMinutesToMs(meta?.runtime),
     genres: Array.isArray(meta?.genres) ? meta.genres : [],
     source: 'cinemeta',
     resolvedImdbId: imdbId
@@ -1378,6 +1389,9 @@ async function resolveMetadata(item, { signal }) {
           imdbRating: Number.isFinite(Number(detail?.vote_average))
             ? Number(detail.vote_average)
             : null,
+          runtimeMs: runtimeMinutesToMs(
+            item.type === 'movie' ? detail?.runtime : detail?.episode_run_time
+          ),
           genres: Array.isArray(detail?.genres)
             ? detail.genres.map(genre => genre?.name).filter(Boolean)
             : [],
@@ -1406,6 +1420,7 @@ async function resolveMetadata(item, { signal }) {
     description: null,
     releaseDate: null,
     imdbRating: null,
+    runtimeMs: null,
     genres: [],
     source: 'failed',
     resolvedTmdbId,

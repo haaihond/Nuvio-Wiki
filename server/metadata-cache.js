@@ -108,11 +108,11 @@ export function createMetadataCache({
     INSERT INTO metadata_cache_meta (key, value) VALUES (?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value
   `);
-  if (getMeta.get('metadata_format_version')?.value !== '2') {
-    // Version 2 adds the resolved IMDb/TMDB pair. Refetch older rows so a
-    // cached metadata result cannot reintroduce split identities.
+  if (getMeta.get('metadata_format_version')?.value !== '3') {
+    // Version 3 adds runtime metadata used to translate percentage-only
+    // resume points into provider-native elapsed positions.
     db.exec('DELETE FROM metadata_cache');
-    setMeta.run('metadata_format_version', '2');
+    setMeta.run('metadata_format_version', '3');
   }
 
   function prune(timestamp = now()) {
@@ -137,6 +137,7 @@ export function createMetadataCache({
           ...(typeof value.backgroundUrl === 'string' ? { backgroundUrl: value.backgroundUrl } : {}),
           ...(typeof value.description === 'string' ? { description: value.description } : {}),
           ...(Number.isFinite(value.imdbRating) ? { imdbRating: value.imdbRating } : {}),
+          ...(Number.isFinite(value.runtimeMs) && value.runtimeMs > 0 ? { runtimeMs: value.runtimeMs } : {}),
           ...(Array.isArray(value.genres) ? { genres: value.genres } : {}),
           ...(typeof value.resolvedTmdbId === 'string' ? { resolvedTmdbId: value.resolvedTmdbId } : {}),
           ...(typeof value.resolvedImdbId === 'string' ? { resolvedImdbId: value.resolvedImdbId } : {})

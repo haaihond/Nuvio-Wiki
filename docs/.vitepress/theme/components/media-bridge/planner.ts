@@ -16,6 +16,7 @@ import {
   type EpisodeSequenceAnchor,
   type EpisodeSimilarityMatch,
   type HistoryRecord,
+  type HistoryWriteMode,
   type LibraryRecord,
   type MappingConfidence,
   type MappingOutcome,
@@ -440,7 +441,10 @@ function updateDiagnostics(
   scope: BridgeScope,
   source: ScopedRecord,
   destination: ScopedRecord,
-  options: { nuvioDuplicateCleanup: boolean }
+  options: {
+    nuvioDuplicateCleanup: boolean
+    historyWriteMode: HistoryWriteMode
+  }
 ): PreviewDiagnostic[] {
   const diagnostics: PreviewDiagnostic[] = []
   const reasons: string[] = []
@@ -449,7 +453,11 @@ function updateDiagnostics(
   if (scope === 'history') {
     const sourceHistory = source as HistoryRecord
     const destinationHistory = destination as HistoryRecord
-    reasons.push('The source watched timestamp is newer.')
+    reasons.push(
+      options.historyWriteMode === 'state'
+        ? 'The source watched timestamp is more than five minutes newer.'
+        : 'The source watched timestamp is newer.'
+    )
     changes.push(
       `watchedAt: ${timestampLabel(destinationHistory.watchedAt)} → ${timestampLabel(sourceHistory.watchedAt)}`
     )
@@ -462,8 +470,8 @@ function updateDiagnostics(
     const destinationProgress = destination as ProgressRecord
     reasons.push(
       sourceProgress.updatedAt > destinationProgress.updatedAt
-        ? 'The source playback state is newer and differs beyond the sync tolerance.'
-        : 'The source playback position differs beyond the sync tolerance.'
+        ? 'The source playback state is newer and differs beyond the five-minute elapsed-time tolerance.'
+        : 'The source playback position differs beyond the five-minute elapsed-time tolerance.'
     )
     const sourcePercentage = progressPercentage(sourceProgress)
     const destinationPercentage = progressPercentage(destinationProgress)
@@ -599,28 +607,58 @@ function progressPercentage(record: ProgressRecord): number | null {
     : null
 }
 
+const ELAPSED_PROGRESS_UPDATE_TOLERANCE_MS = 5 * 60 * 1000
+const ABSOLUTE_PROGRESS_DESTINATIONS = new Set<ServiceId>(['nuvio', 'stremio'])
+
+function absoluteProgressState(
+  record: ProgressRecord
+): { positionMs: number; durationMs: number } | null {
+  const positionMs = Number(record.positionMs)
+  const durationMs = Number(record.durationMs)
+  return Number.isFinite(positionMs) && positionMs >= 0
+    && Number.isFinite(durationMs) && durationMs > 0
+    ? { positionMs, durationMs }
+    : null
+}
+
+function materializeDestinationProgress(
+  source: ProgressRecord,
+  destination: ProgressRecord,
+  destinationService?: ServiceId
+): ProgressRecord {
+  if (!destinationService || !ABSOLUTE_PROGRESS_DESTINATIONS.has(destinationService)) return source
+  if (absoluteProgressState(source)) return source
+
+  const percentage = progressPercentage(source)
+  const destinationDurationMs = absoluteProgressState(destination)?.durationMs
+  if (percentage === null || !destinationDurationMs) return source
+
+  return {
+    ...source,
+    positionMs: Math.round(destinationDurationMs * percentage / 100),
+    durationMs: destinationDurationMs,
+    percentage
+  }
+}
+
 function progressEquivalent(source: ProgressRecord, destination: ProgressRecord): boolean {
-  const sourceDuration = Number(source.durationMs)
-  const destinationDuration = Number(destination.durationMs)
-  const sourcePosition = Number(source.positionMs)
-  const destinationPosition = Number(destination.positionMs)
-  const durationsValid = sourceDuration > 0 && destinationDuration > 0
+  const sourceAbsolute = absoluteProgressState(source)
+  const destinationAbsolute = absoluteProgressState(destination)
+  if (sourceAbsolute && destinationAbsolute) {
+    return Math.abs(sourceAbsolute.positionMs - destinationAbsolute.positionMs)
+      <= ELAPSED_PROGRESS_UPDATE_TOLERANCE_MS
+  }
 
   const sourcePercentage = progressPercentage(source)
   const destinationPercentage = progressPercentage(destination)
-  if (
+  return Boolean(
     sourcePercentage !== null
     && destinationPercentage !== null
     && Math.abs(sourcePercentage - destinationPercentage) <= 1
-  ) return true
-
-  if (!durationsValid) return false
-
-  const durationDifference = Math.abs(sourceDuration - destinationDuration)
-  const durationScale = Math.max(sourceDuration, destinationDuration, 1)
-  const durationNear = durationDifference <= 5_000 || (durationDifference / durationScale) <= 0.01
-  return durationNear && Math.abs(sourcePosition - destinationPosition) <= 5_000
+  )
 }
+
+const STATE_HISTORY_TIMESTAMP_TOLERANCE_MS = 5 * 60 * 1000
 
 function needsNuvioLibraryImdbUpgrade(source: ScopedRecord, destination: ScopedRecord): boolean {
   const sourceImdb = String(source.media.ids.imdb ?? '').trim().toLowerCase()
@@ -633,7 +671,8 @@ function needsNuvioLibraryImdbUpgrade(source: ScopedRecord, destination: ScopedR
 function classifyRecord(
   scope: BridgeScope,
   source: ScopedRecord,
-  destination: ScopedRecord | undefined
+  destination: ScopedRecord | undefined,
+  historyWriteMode: HistoryWriteMode
 ): Extract<PreviewOutcome, 'add' | 'update' | 'already-present'> {
   if (!destination) return 'add'
 
@@ -644,7 +683,10 @@ function classifyRecord(
   if (scope === 'history') {
     const sourceHistory = source as HistoryRecord
     const destinationHistory = destination as HistoryRecord
-    return sourceHistory.watchedAt > destinationHistory.watchedAt
+    const updateThreshold = historyWriteMode === 'state'
+      ? STATE_HISTORY_TIMESTAMP_TOLERANCE_MS
+      : 0
+    return sourceHistory.watchedAt - destinationHistory.watchedAt > updateThreshold
       ? 'update'
       : 'already-present'
   }
@@ -889,7 +931,7 @@ export function planMediaBridgePreview(input: MediaBridgePlanInput): MediaBridge
         continue
       }
 
-      const plannedRecord = cloneRecordWithMedia(scope, sourceRecord, mappedMedia)
+      let plannedRecord = cloneRecordWithMedia(scope, sourceRecord, mappedMedia)
       const destinationRecord = scope === 'history' && historyWriteMode === 'events'
         ? findDestinationHistoryEvent(
             destinationByScope.history,
@@ -899,7 +941,14 @@ export function planMediaBridgePreview(input: MediaBridgePlanInput): MediaBridge
             sourceIdentity
           )
         : findDestinationRecord(destinationByScope[scope], mappedMedia, scope, sourceIdentity)
-      let outcome = classifyRecord(scope, plannedRecord, destinationRecord)
+      if (scope === 'progress' && destinationRecord) {
+        plannedRecord = materializeDestinationProgress(
+          plannedRecord as ProgressRecord,
+          destinationRecord as ProgressRecord,
+          input.destinationService
+        )
+      }
+      let outcome = classifyRecord(scope, plannedRecord, destinationRecord, historyWriteMode)
       const nuvioDuplicateCleanup = Boolean(
         scope === 'library'
         && input.destinationService === 'nuvio'
@@ -909,7 +958,10 @@ export function planMediaBridgePreview(input: MediaBridgePlanInput): MediaBridge
         outcome = 'update'
       }
       const diagnostics = outcome === 'update' && destinationRecord
-        ? updateDiagnostics(scope, plannedRecord, destinationRecord, { nuvioDuplicateCleanup })
+        ? updateDiagnostics(scope, plannedRecord, destinationRecord, {
+            nuvioDuplicateCleanup,
+            historyWriteMode
+          })
         : []
       const updateReason = diagnostics.find(diagnostic => diagnostic.key === 'updateReason')?.value
       // Existing destination records are authoritative. Provider ID, title, and

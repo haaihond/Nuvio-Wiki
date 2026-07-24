@@ -23,6 +23,11 @@ function safeText(value, maxLength) {
   return text ? text.slice(0, maxLength) : null;
 }
 
+function normalizeRuntimeMs(value) {
+  const runtimeMs = Number(value);
+  return Number.isFinite(runtimeMs) && runtimeMs > 0 ? Math.round(runtimeMs) : null;
+}
+
 function normalizeItem(item) {
   const value = item && typeof item === 'object' && !Array.isArray(item) ? item : {};
   const type = value.content_type === 'movie' ? 'movie' : 'series';
@@ -55,6 +60,7 @@ function publicResult(contentId, value, fromCache = false) {
     description: value.description || null,
     releaseDate: value.releaseDate || null,
     imdbRating: Number.isFinite(value.imdbRating) ? value.imdbRating : null,
+    runtimeMs: normalizeRuntimeMs(value.runtimeMs),
     genres: Array.isArray(value.genres) ? value.genres : [],
     source: value.source,
     ...(value.retryable ? { retryable: true } : {}),
@@ -202,6 +208,7 @@ export function createMetadataEnricher({
           description: null,
           releaseDate: null,
           imdbRating: null,
+          runtimeMs: null,
           genres: [],
           source: 'missing'
         } });
@@ -240,6 +247,7 @@ export function createMetadataEnricher({
             description: null,
             releaseDate: null,
             imdbRating: null,
+            runtimeMs: null,
             genres: [],
             resolvedTmdbId: task.tmdbId,
             resolvedImdbId: task.imdbId,
@@ -260,6 +268,7 @@ export function createMetadataEnricher({
             imdbRating: Number.isFinite(Number(fetched?.imdbRating))
               ? Number(fetched.imdbRating)
               : null,
+            runtimeMs: normalizeRuntimeMs(fetched?.runtimeMs),
             genres: Array.isArray(fetched?.genres)
               ? fetched.genres.filter(genre => typeof genre === 'string' && genre.trim()).slice(0, 64)
               : [],
@@ -278,6 +287,7 @@ export function createMetadataEnricher({
             description: null,
             releaseDate: null,
             imdbRating: null,
+            runtimeMs: null,
             genres: [],
             resolvedTmdbId: task.tmdbId,
             resolvedImdbId: task.imdbId,
@@ -294,6 +304,7 @@ export function createMetadataEnricher({
             description: task.result.description,
             releaseDate: task.result.releaseDate,
             imdbRating: task.result.imdbRating,
+            runtimeMs: task.result.runtimeMs,
             genres: task.result.genres,
             resolvedTmdbId: task.result.resolvedTmdbId,
             resolvedImdbId: task.result.resolvedImdbId,

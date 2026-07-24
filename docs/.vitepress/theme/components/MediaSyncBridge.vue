@@ -48,6 +48,7 @@ import {
   type TraktCredentials
 } from './mediaBridgeProviders'
 import { mediaBridgeEngine } from './media-bridge/engine'
+import { parseTraktExportZip } from './media-bridge/trakt-export'
 
 const props = withDefaults(defineProps<{
   defaultExpanded?: boolean
@@ -140,6 +141,8 @@ const copy = computed(() => isDutch.value ? {
   setupStopped: 'Instellen gestopt',
   noChanges: 'Er zijn geen nieuwe of nieuwere items om te synchroniseren.',
   authorizeSeparate: 'Autoriseer voor deze kant een afzonderlijke sessie:',
+  traktZipHelp: 'Of gebruik het .zip-bestand uit de Trakt-gegevensexport. Het bestand wordt alleen lokaal in je browser gelezen.',
+  traktZipChoose: 'Trakt ZIP kiezen',
   stremioDevice: 'Gebruik de apparaatkoppeling van Stremio, zodat deze pagina je wachtwoord nooit ontvangt.',
   plexDevice: 'Meld je aan bij Plex en kies daarna de mediaserver die je wilt synchroniseren.',
   openPlex: 'Open Plex-goedkeuring',
@@ -244,6 +247,8 @@ const copy = computed(() => isDutch.value ? {
   setupStopped: 'Setup stopped',
   noChanges: 'There are no new or newer items to sync.',
   authorizeSeparate: 'Authorize a separate session for this side:',
+  traktZipHelp: 'Or use the .zip file from your Trakt data export. The file is read only in your browser.',
+  traktZipChoose: 'Choose Trakt ZIP',
   stremioDevice: 'Use Stremio’s device link so this page never receives your password.',
   plexDevice: 'Sign in with Plex, then choose the media server you want to sync.',
   openPlex: 'Open Plex approval',
@@ -849,6 +854,48 @@ async function preparePlan(
   }
 }
 
+async function connectTraktExport(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || selectedService.source !== 'trakt') return
+  const attempt = ++connectionAttempt.source
+  connectionBusy.source = true
+  globalError.value = ''
+  appendLog(`Reading Trakt export ${file.name}...`)
+  try {
+    const accountId = `zip-${file.lastModified}-${file.size}`
+    const parsed = await parseTraktExportZip(file, { accountId })
+    if (attempt !== connectionAttempt.source || selectedService.source !== 'trakt') return
+    connections.source = {
+      slot: 'source',
+      service: 'trakt',
+      accountId,
+      displayName: file.name,
+      credentials: {
+        service: 'trakt',
+        clientId: '',
+        tokens: { access_token: '' },
+        refreshUrl: '',
+        archiveBundle: parsed.bundle,
+        archiveWarnings: parsed.warnings
+      }
+    }
+    clearPreview()
+    const itemCount = parsed.bundle.history.length
+      + parsed.bundle.progress.length
+      + parsed.bundle.library.length
+    appendLog(`Loaded ${itemCount} items from ${parsed.parsedFiles.length} Trakt export files.`)
+    statusMessage.value = `${copy.value.source} connected from ${file.name}.`
+  } catch (error: any) {
+    if (attempt !== connectionAttempt.source) return
+    globalError.value = error?.message || 'The Trakt export could not be read.'
+    appendLog(`Trakt export failed: ${globalError.value}`)
+  } finally {
+    if (attempt === connectionAttempt.source) connectionBusy.source = false
+  }
+}
+
 function appendIssueLogs(issues: readonly BridgeIssue[]) {
   for (const issue of issues) {
     const media = formatIssueMedia(issue)
@@ -1166,6 +1213,21 @@ onBeforeUnmount(() => {
               >
                 {{ connectionBusy[slot] ? copy.connecting : `${copy.connect} ${SERVICE_DEFINITIONS[selectedService[slot]].label}` }}
               </button>
+              <div
+                v-if="slot === 'source' && selectedService[slot] === 'trakt'"
+                class="trakt-export-import"
+              >
+                <p>{{ copy.traktZipHelp }}</p>
+                <label class="secondary-button connect-button file-button">
+                  {{ copy.traktZipChoose }}
+                  <input
+                    type="file"
+                    accept=".zip,application/zip"
+                    :disabled="connectionBusy.source"
+                    @change="connectTraktExport"
+                  />
+                </label>
+              </div>
             </div>
 
             <form
@@ -1730,6 +1792,26 @@ onBeforeUnmount(() => {
 
 .connect-area { display: flex; flex-direction: column; gap: 14px; }
 .connect-area p { margin: 0; color: var(--vp-c-text-2); font-size: 13px; line-height: 1.55; }
+.trakt-export-import {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--vp-c-divider);
+}
+.file-button {
+  position: relative;
+  overflow: hidden;
+  align-self: flex-start;
+  cursor: pointer;
+}
+.file-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
 .device-link { display: inline-flex; align-items: center; min-height: 36px; color: var(--vp-c-brand-1); font-size: 12px; font-weight: 600; }
 .password-fallback { color: var(--vp-c-text-3); font-size: 11px; }
 .password-fallback summary { cursor: pointer; }
