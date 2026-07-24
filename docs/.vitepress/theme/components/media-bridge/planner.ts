@@ -11,6 +11,8 @@ import {
   type BridgeScope,
   type CanonicalBundle,
   type ConnectedEndpoint,
+  type EpisodeMappingEvidence,
+  type EpisodeRef,
   type HistoryRecord,
   type LibraryRecord,
   type MappingConfidence,
@@ -36,12 +38,31 @@ export interface ProviderMappingIssue {
   mapping: MappingOutcome
 }
 
+export type PreviewDiagnosticKey =
+  | 'sourceEpisode'
+  | 'resolvedSource'
+  | 'episodeTitle'
+  | 'videoId'
+  | 'mediaIds'
+  | 'canonicalKey'
+  | 'catalogSizes'
+  | 'videoIdMatches'
+  | 'coordinateMatches'
+  | 'absoluteMatches'
+  | 'titleMatches'
+
+export interface PreviewDiagnostic {
+  readonly key: PreviewDiagnosticKey
+  readonly value: string
+}
+
 export interface PreviewRow {
   readonly id: string
   readonly scope: BridgeScope
   readonly media: MediaRef
   readonly mediaKind: MediaRef['kind']
   readonly title: string
+  readonly episodeLabel: string | null
   readonly outcome: PreviewOutcome
   readonly outcomeLabel: string
   readonly sourceKey: string | null
@@ -49,6 +70,7 @@ export interface PreviewRow {
   readonly remapped: boolean
   readonly mappingConfidence: MappingConfidence | null
   readonly detail: string
+  readonly diagnostics: readonly PreviewDiagnostic[]
 }
 
 export interface PreviewStats {
@@ -233,6 +255,94 @@ function cloneRecordWithMedia(
 
 function displayTitle(media: MediaRef): string {
   return mediaTitle(media)
+}
+
+function episodeCoordinates(media: Pick<MediaRef, 'kind' | 'season' | 'episode'>): string | null {
+  if (
+    media.kind !== 'series'
+    || !Number.isInteger(media.season)
+    || !Number.isInteger(media.episode)
+  ) return null
+  return `S${String(media.season).padStart(2, '0')}E${String(media.episode).padStart(2, '0')}`
+}
+
+function episodeLabel(media: MediaRef): string | null {
+  const coordinates = episodeCoordinates(media)
+  if (!coordinates) return null
+  const title = String(media.episodeTitle || '').trim()
+  return title ? `${coordinates} · ${title}` : coordinates
+}
+
+function episodeRefLabel(episode: EpisodeRef | null | undefined): string {
+  if (!episode) return 'Unavailable'
+  const coordinates = Number.isInteger(episode.season) && Number.isInteger(episode.episode)
+    ? `S${String(episode.season).padStart(2, '0')}E${String(episode.episode).padStart(2, '0')}`
+    : 'No season/episode coordinates'
+  const parts = [coordinates]
+  if (episode.title) parts.push(`“${episode.title}”`)
+  if (Number.isInteger(episode.absoluteEpisode)) parts.push(`absolute ${episode.absoluteEpisode}`)
+  if (episode.videoId) parts.push(`video ID ${episode.videoId}`)
+  return parts.join(' · ')
+}
+
+function episodeRefsLabel(episodes: readonly EpisodeRef[]): string {
+  return episodes.length ? episodes.map(episodeRefLabel).join(' | ') : 'None'
+}
+
+function mediaIdsLabel(ids: MediaIds): string {
+  const values: string[] = []
+  for (const namespace of ['imdb', 'tmdb', 'tvdb', 'trakt', 'simkl', 'plex', 'jellyfin', 'stremio', 'slug'] as const) {
+    const value = ids[namespace]
+    if (value !== undefined && value !== null && String(value).trim()) {
+      values.push(`${namespace}:${value}`)
+    }
+  }
+  for (const [namespace, value] of Object.entries(ids.external || {}).sort(([left], [right]) => left.localeCompare(right))) {
+    if (value !== undefined && value !== null && String(value).trim()) {
+      values.push(`${namespace}:${value}`)
+    }
+  }
+  return values.length ? values.join(', ') : 'None'
+}
+
+function mappingEvidenceDiagnostics(
+  media: MediaRef,
+  sourceKey: string | null,
+  evidence?: EpisodeMappingEvidence
+): PreviewDiagnostic[] {
+  const diagnostics: PreviewDiagnostic[] = []
+  const sourceEpisode = evidence?.requested || (
+    media.kind === 'series'
+      ? {
+          season: Number(media.season),
+          episode: Number(media.episode),
+          absoluteEpisode: media.absoluteEpisode,
+          title: media.episodeTitle,
+          videoId: media.videoId
+        }
+      : null
+  )
+  if (media.kind === 'series') {
+    diagnostics.push({ key: 'sourceEpisode', value: episodeRefLabel(sourceEpisode) })
+  }
+  if (evidence?.resolvedSource) {
+    diagnostics.push({ key: 'resolvedSource', value: episodeRefLabel(evidence.resolvedSource) })
+  }
+  if (media.episodeTitle) diagnostics.push({ key: 'episodeTitle', value: media.episodeTitle })
+  if (media.videoId) diagnostics.push({ key: 'videoId', value: media.videoId })
+  diagnostics.push({ key: 'mediaIds', value: mediaIdsLabel(media.ids) })
+  diagnostics.push({ key: 'canonicalKey', value: sourceKey || 'Unavailable' })
+  if (evidence) {
+    diagnostics.push({
+      key: 'catalogSizes',
+      value: `${evidence.sourceCatalogSize} source / ${evidence.destinationCatalogSize} destination episodes`
+    })
+    diagnostics.push({ key: 'videoIdMatches', value: episodeRefsLabel(evidence.videoIdMatches) })
+    diagnostics.push({ key: 'coordinateMatches', value: episodeRefsLabel(evidence.coordinateMatches) })
+    diagnostics.push({ key: 'absoluteMatches', value: episodeRefsLabel(evidence.absoluteMatches) })
+    diagnostics.push({ key: 'titleMatches', value: episodeRefsLabel(evidence.titleMatches) })
+  }
+  return diagnostics
 }
 
 function outcomeLabel(outcome: PreviewOutcome, remapped: boolean): string {
@@ -541,13 +651,19 @@ export function planMediaBridgePreview(input: MediaBridgePlanInput): MediaBridge
           media: originalMedia,
           mediaKind: originalMedia.kind,
           title: displayTitle(originalMedia),
+          episodeLabel: episodeLabel(originalMedia),
           outcome,
           outcomeLabel: outcomeLabel(outcome, false),
           sourceKey,
           targetKey: null,
           remapped: false,
           mappingConfidence: issue?.mapping.confidence || 'none',
-          detail
+          detail,
+          diagnostics: mappingEvidenceDiagnostics(
+            originalMedia,
+            sourceKey,
+            issue?.mapping.evidence
+          )
         })
         continue
       }
@@ -567,13 +683,19 @@ export function planMediaBridgePreview(input: MediaBridgePlanInput): MediaBridge
           media: originalMedia,
           mediaKind: originalMedia.kind,
           title: displayTitle(originalMedia),
+          episodeLabel: episodeLabel(originalMedia),
           outcome: 'unresolved',
           outcomeLabel: outcomeLabel('unresolved', false),
           sourceKey,
           targetKey: null,
           remapped: false,
           mappingConfidence: issue?.mapping.confidence || 'none',
-          detail: issue?.mapping.reason || 'The mapped record has no canonical destination key.'
+          detail: issue?.mapping.reason || 'The mapped record has no canonical destination key.',
+          diagnostics: mappingEvidenceDiagnostics(
+            originalMedia,
+            sourceKey,
+            issue?.mapping.evidence
+          )
         })
         continue
       }
@@ -623,6 +745,7 @@ export function planMediaBridgePreview(input: MediaBridgePlanInput): MediaBridge
         media: destinationRecord?.media || mappedMedia,
         mediaKind: destinationRecord?.media.kind || mappedMedia.kind,
         title: displayTitle(destinationRecord?.media || mappedMedia),
+        episodeLabel: episodeLabel(destinationRecord?.media || mappedMedia),
         outcome,
         outcomeLabel: outcomeLabel(outcome, remapped),
         sourceKey,
@@ -633,7 +756,8 @@ export function planMediaBridgePreview(input: MediaBridgePlanInput): MediaBridge
           ? outcome === 'already-present'
             ? 'Destination item already exists and is unchanged.'
             : 'Destination item already exists; only its sync state will be updated.'
-          : issue?.mapping.reason || outcomeLabel(outcome, false)
+          : issue?.mapping.reason || outcomeLabel(outcome, false),
+        diagnostics: []
       })
     }
   }

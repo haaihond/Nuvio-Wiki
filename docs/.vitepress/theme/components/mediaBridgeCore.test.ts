@@ -359,6 +359,29 @@ test('never guesses an episode by ordered position after deterministic matches f
   assert.equal(ordinalOnly.confidence, 'none')
   assert.equal(ordinalOnly.target, null)
   assert.match(ordinalOnly.reason, /No deterministic episode mapping/)
+  assert.equal(ordinalOnly.evidence?.sourceCatalogSize, 2)
+  assert.equal(ordinalOnly.evidence?.destinationCatalogSize, 2)
+  assert.deepEqual(ordinalOnly.evidence?.resolvedSource, {
+    season: 1,
+    episode: 2,
+    absoluteEpisode: 10
+  })
+  assert.deepEqual(ordinalOnly.evidence?.coordinateMatches, [])
+  assert.deepEqual(ordinalOnly.evidence?.absoluteMatches, [])
+
+  const conflictingCoordinateTitle = remapEpisode(
+    { season: 1, episode: 5, title: 'The Wolf and the Lion', videoId: 'source:5' },
+    [{ season: 1, episode: 5, title: 'The Wolf and the Lion', videoId: 'source:5' }],
+    [{ season: 1, episode: 5, title: 'Episode Five', videoId: 'destination:5' }]
+  )
+  assert.equal(conflictingCoordinateTitle.status, 'unresolved')
+  assert.deepEqual(conflictingCoordinateTitle.evidence?.coordinateMatches, [{
+    season: 1,
+    episode: 5,
+    title: 'Episode Five',
+    videoId: 'destination:5'
+  }])
+  assert.deepEqual(conflictingCoordinateTitle.evidence?.titleMatches, [])
 
   const unresolved = remapEpisode(
     { season: 1, episode: 1 },

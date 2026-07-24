@@ -20,7 +20,8 @@ import {
   type SyncScopes
 } from './mediaBridgeCore'
 import {
-  type MediaBridgePreviewPlan
+  type MediaBridgePreviewPlan,
+  type PreviewDiagnosticKey
 } from './mediaBridgePlan'
 import {
   createJellyfinConnection,
@@ -105,6 +106,18 @@ const copy = computed(() => isDutch.value ? {
   titleCol: 'Titel',
   outcome: 'Resultaat',
   detail: 'Details',
+  troubleshooting: 'Probleemoplossingsdetails',
+  diagSourceEpisode: 'Bronaflevering',
+  diagResolvedSource: 'Opgeloste bronaflevering',
+  diagEpisodeTitle: 'Afleveringstitel',
+  diagVideoId: 'Video-ID',
+  diagMediaIds: 'Media-ID’s',
+  diagCanonicalKey: 'Canonieke bronsleutel',
+  diagCatalogSizes: 'Catalogusgrootte',
+  diagVideoIdMatches: 'Overeenkomsten op video-ID',
+  diagCoordinateMatches: 'Overeenkomsten op seizoen/aflevering',
+  diagAbsoluteMatches: 'Overeenkomsten op absoluut nummer',
+  diagTitleMatches: 'Overeenkomsten op titel',
   previous: 'Vorige',
   next: 'Volgende',
   page: 'Pagina',
@@ -188,6 +201,18 @@ const copy = computed(() => isDutch.value ? {
   titleCol: 'Title',
   outcome: 'Outcome',
   detail: 'Details',
+  troubleshooting: 'Troubleshooting details',
+  diagSourceEpisode: 'Source episode',
+  diagResolvedSource: 'Resolved source episode',
+  diagEpisodeTitle: 'Episode title',
+  diagVideoId: 'Video ID',
+  diagMediaIds: 'Media IDs',
+  diagCanonicalKey: 'Canonical source key',
+  diagCatalogSizes: 'Catalog sizes',
+  diagVideoIdMatches: 'Video ID matches',
+  diagCoordinateMatches: 'Season/episode matches',
+  diagAbsoluteMatches: 'Absolute-number matches',
+  diagTitleMatches: 'Episode-title matches',
   previous: 'Previous',
   next: 'Next',
   page: 'Page',
@@ -369,6 +394,23 @@ let documentScrollLocked = false
 
 function slotLabel(slot: BridgeSlot) {
   return slot === 'source' ? copy.value.source : copy.value.destination
+}
+
+function diagnosticLabel(key: PreviewDiagnosticKey): string {
+  const labels: Record<PreviewDiagnosticKey, string> = {
+    sourceEpisode: copy.value.diagSourceEpisode,
+    resolvedSource: copy.value.diagResolvedSource,
+    episodeTitle: copy.value.diagEpisodeTitle,
+    videoId: copy.value.diagVideoId,
+    mediaIds: copy.value.diagMediaIds,
+    canonicalKey: copy.value.diagCanonicalKey,
+    catalogSizes: copy.value.diagCatalogSizes,
+    videoIdMatches: copy.value.diagVideoIdMatches,
+    coordinateMatches: copy.value.diagCoordinateMatches,
+    absoluteMatches: copy.value.diagAbsoluteMatches,
+    titleMatches: copy.value.diagTitleMatches
+  }
+  return labels[key]
 }
 
 function serviceLogo(service: ServiceId) {
@@ -1321,9 +1363,23 @@ onBeforeUnmount(() => {
               <tbody>
                 <tr v-for="row in previewRows" :key="row.id">
                   <td><span class="scope-chip">{{ formatScope(row.scope) }}</span></td>
-                  <td><strong>{{ row.title }}</strong></td>
+                  <td>
+                    <strong>{{ row.title }}</strong>
+                    <small v-if="row.episodeLabel" class="preview-episode">{{ row.episodeLabel }}</small>
+                  </td>
                   <td><span :class="['outcome-chip', outcomeClass(row.outcome)]">{{ row.outcomeLabel }}</span></td>
-                  <td class="detail-cell">{{ row.detail }}</td>
+                  <td class="detail-cell">
+                    <span>{{ row.detail }}</span>
+                    <details v-if="row.diagnostics.length" class="mapping-diagnostics">
+                      <summary>{{ copy.troubleshooting }}</summary>
+                      <dl>
+                        <template v-for="diagnostic in row.diagnostics" :key="diagnostic.key">
+                          <dt>{{ diagnosticLabel(diagnostic.key) }}</dt>
+                          <dd>{{ diagnostic.value }}</dd>
+                        </template>
+                      </dl>
+                    </details>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -1731,7 +1787,13 @@ th, td { padding: 10px 12px; border-bottom: 1px solid var(--vp-c-divider); text-
 th { position: sticky; top: 0; z-index: 1; background: var(--vp-c-bg-alt); color: var(--vp-c-text-2); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; }
 td { color: var(--vp-c-text-2); }
 td strong { color: var(--vp-c-text-1); font-weight: 650; }
+.preview-episode { display: block; margin-top: 4px; color: var(--vp-c-text-3); font-size: 10px; line-height: 1.4; }
 .detail-cell { min-width: 220px; max-width: 380px; }
+.mapping-diagnostics { margin-top: 8px; }
+.mapping-diagnostics summary { width: fit-content; cursor: pointer; color: var(--vp-c-brand-1); font-size: 10px; font-weight: 650; }
+.mapping-diagnostics dl { display: grid; grid-template-columns: minmax(105px, auto) minmax(0, 1fr); gap: 5px 10px; margin: 9px 0 0; padding: 9px; border: 1px solid var(--vp-c-divider); border-radius: 8px; background: var(--vp-c-bg-alt); }
+.mapping-diagnostics dt { color: var(--vp-c-text-3); font-size: 9px; font-weight: 700; }
+.mapping-diagnostics dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--vp-c-text-2); font-family: var(--vp-font-family-mono); font-size: 9px; }
 .scope-chip, .outcome-chip, .issue-status { display: inline-flex; padding: 4px 7px; border-radius: 999px; font-size: 9px; font-weight: 750; white-space: nowrap; }
 .scope-chip { background: var(--vp-c-default-soft); color: var(--vp-c-text-2); }
 .outcome-add { background: var(--vp-c-green-soft); color: var(--vp-c-green-1); }

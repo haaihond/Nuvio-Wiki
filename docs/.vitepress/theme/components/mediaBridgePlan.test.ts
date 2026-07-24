@@ -553,7 +553,32 @@ test('skips explicit unresolved and ambiguous provider mappings', () => {
         confidence: 'none',
         target: null,
         candidates: [],
-        reason: 'No destination metadata.'
+        reason: 'No destination metadata.',
+        evidence: {
+          requested: {
+            season: 1,
+            episode: 1,
+            title: 'Episode 1',
+            videoId: 'source:episode-1'
+          },
+          resolvedSource: {
+            season: 1,
+            episode: 1,
+            title: 'Episode 1',
+            videoId: 'source:episode-1'
+          },
+          sourceCatalogSize: 10,
+          destinationCatalogSize: 8,
+          videoIdMatches: [],
+          coordinateMatches: [{
+            season: 1,
+            episode: 1,
+            title: 'Pilot',
+            videoId: 'destination:episode-1'
+          }],
+          absoluteMatches: [],
+          titleMatches: []
+        }
       }
     },
     {
@@ -586,6 +611,26 @@ test('skips explicit unresolved and ambiguous provider mappings', () => {
   assert.equal(plan.transfer.history.length, 0)
   assert.deepEqual(plan.rows.map(row => row.outcome), ['unresolved', 'ambiguous'])
   assert.ok(plan.rows.every(row => row.outcomeLabel.startsWith('Skipped')))
+  assert.equal(plan.rows[0].episodeLabel, 'S01E01 · Episode 1')
+  assert.deepEqual(
+    plan.rows[0].diagnostics.map(diagnostic => diagnostic.key),
+    [
+      'sourceEpisode',
+      'resolvedSource',
+      'episodeTitle',
+      'mediaIds',
+      'canonicalKey',
+      'catalogSizes',
+      'videoIdMatches',
+      'coordinateMatches',
+      'absoluteMatches',
+      'titleMatches'
+    ]
+  )
+  assert.match(
+    plan.rows[0].diagnostics.find(diagnostic => diagnostic.key === 'coordinateMatches')?.value || '',
+    /S01E01.*Pilot.*destination:episode-1/
+  )
 })
 
 test('applies a deterministic episode remap before comparison and transfer', () => {

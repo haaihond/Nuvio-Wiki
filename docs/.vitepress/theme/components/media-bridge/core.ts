@@ -758,7 +758,22 @@ export interface EpisodeRef {
 
 export type MappingConfidence = 'exact' | 'high' | 'medium' | 'low' | 'none'
 
-export type MappingOutcome =
+export interface EpisodeMappingEvidence {
+  requested: EpisodeRef
+  resolvedSource: EpisodeRef | null
+  sourceCatalogSize: number
+  destinationCatalogSize: number
+  videoIdMatches: readonly EpisodeRef[]
+  coordinateMatches: readonly EpisodeRef[]
+  absoluteMatches: readonly EpisodeRef[]
+  titleMatches: readonly EpisodeRef[]
+}
+
+type MappingEvidenceCarrier = {
+  evidence?: EpisodeMappingEvidence
+}
+
+export type MappingOutcome = MappingEvidenceCarrier & (
   | {
       status: 'mapped'
       confidence: Exclude<MappingConfidence, 'none'>
@@ -780,6 +795,7 @@ export type MappingOutcome =
       candidates: readonly []
       reason: string
     }
+)
 
 function episodeSort(left: EpisodeRef, right: EpisodeRef): number {
   const leftAbsolute = validEpisode(left.absoluteEpisode) ? left.absoluteEpisode : Number.MAX_SAFE_INTEGER
@@ -887,62 +903,103 @@ export function remapEpisode(
   sourceEpisodes: readonly EpisodeRef[],
   targetEpisodes: readonly EpisodeRef[]
 ): MappingOutcome {
+  const baseEvidence = {
+    requested: { ...requested },
+    resolvedSource: null,
+    sourceCatalogSize: sourceEpisodes.length,
+    destinationCatalogSize: targetEpisodes.length,
+    videoIdMatches: [],
+    coordinateMatches: [],
+    absoluteMatches: [],
+    titleMatches: []
+  } satisfies EpisodeMappingEvidence
   if (!targetEpisodes.length) {
     return {
       status: 'unresolved',
       confidence: 'none',
       target: null,
       candidates: [],
-      reason: 'The destination has no episode metadata.'
+      reason: 'The destination has no episode metadata.',
+      evidence: baseEvidence
     }
   }
 
   const resolvedSource = resolveSourceEpisode(requested, sourceEpisodes)
-  if ('status' in resolvedSource) return resolvedSource
+  if ('status' in resolvedSource) {
+    return { ...resolvedSource, evidence: baseEvidence }
+  }
   const source = resolvedSource
+  const sourceTitle = meaningfulEpisodeTitle(source.title)
+  const videoIdMatches = source.videoId
+    ? targetEpisodes.filter(item => item.videoId === source.videoId)
+    : []
+  const coordinateMatches = targetEpisodes.filter(item => (
+    item.season === source.season && item.episode === source.episode
+  ))
+  const absoluteMatches = validEpisode(source.absoluteEpisode)
+    ? targetEpisodes.filter(item => item.absoluteEpisode === source.absoluteEpisode)
+    : []
+  const titleMatches = sourceTitle
+    ? targetEpisodes.filter(item => meaningfulEpisodeTitle(item.title) === sourceTitle)
+    : []
+  const evidence: EpisodeMappingEvidence = {
+    ...baseEvidence,
+    resolvedSource: { ...source },
+    videoIdMatches: sortedEpisodes(videoIdMatches),
+    coordinateMatches: sortedEpisodes(coordinateMatches),
+    absoluteMatches: sortedEpisodes(absoluteMatches),
+    titleMatches: sortedEpisodes(titleMatches)
+  }
 
   if (source.videoId) {
     const result = uniqueCandidate(
       'exact',
-      targetEpisodes.filter(item => item.videoId === source.videoId),
+      videoIdMatches,
       'The source and destination share the same video ID.',
       'The destination contains duplicate matches for the video ID.'
     )
-    if (result) return result
+    if (result) return { ...result, evidence }
   }
 
-  const sourceTitle = meaningfulEpisodeTitle(source.title)
-  const coordinateMatches = targetEpisodes.filter(item => (
-    item.season === source.season && item.episode === source.episode
-  ))
   if (coordinateMatches.length > 1) {
-    return ambiguous('high', coordinateMatches, 'The destination contains duplicate season/episode matches.')
+    return {
+      ...ambiguous('high', coordinateMatches, 'The destination contains duplicate season/episode matches.'),
+      evidence
+    }
   }
   if (coordinateMatches.length === 1) {
     const targetTitle = meaningfulEpisodeTitle(coordinateMatches[0].title)
     if (!sourceTitle || !targetTitle || sourceTitle === targetTitle) {
-      return mapped('high', coordinateMatches[0], 'Season and episode numbering match.')
+      return {
+        ...mapped('high', coordinateMatches[0], 'Season and episode numbering match.'),
+        evidence
+      }
     }
   }
 
   if (validEpisode(source.absoluteEpisode)) {
     const result = uniqueCandidate(
       'medium',
-      targetEpisodes.filter(item => item.absoluteEpisode === source.absoluteEpisode),
+      absoluteMatches,
       'A unique absolute episode number matched.',
       'The absolute episode number matches multiple destination episodes.'
     )
-    if (result) return result
+    if (result) return { ...result, evidence }
   }
 
   if (sourceTitle) {
-    const titleMatches = targetEpisodes.filter(item => meaningfulEpisodeTitle(item.title) === sourceTitle)
     if (titleMatches.length === 1) {
-      return mapped('high', titleMatches[0], 'A unique normalized episode title matched.')
+      return {
+        ...mapped('high', titleMatches[0], 'A unique normalized episode title matched.'),
+        evidence
+      }
     }
 
     if (titleMatches.length > 1) {
-      return ambiguous('high', titleMatches, 'The normalized episode title matches multiple destination episodes.')
+      return {
+        ...ambiguous('high', titleMatches, 'The normalized episode title matches multiple destination episodes.'),
+        evidence
+      }
     }
   }
 
@@ -951,7 +1008,8 @@ export function remapEpisode(
     confidence: 'none',
     target: null,
     candidates: [],
-    reason: 'No deterministic episode mapping was found.'
+    reason: 'No deterministic episode mapping was found.',
+    evidence
   }
 }
 
