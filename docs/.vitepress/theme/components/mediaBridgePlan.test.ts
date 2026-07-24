@@ -105,6 +105,21 @@ test('classifies add, update, and already-present records without downgrading pr
   assert.equal(plan.transfer.history.length, 2)
   assert.equal(plan.transfer.progress.length, 1)
   assert.equal(plan.rows.find(row => row.title === 'Destination newer')?.outcome, 'already-present')
+  const historyUpdate = plan.rows.find(row => row.title === 'Newer')
+  assert.equal(historyUpdate?.detail, 'The source watched timestamp is newer.')
+  assert.match(
+    historyUpdate?.diagnostics.find(diagnostic => diagnostic.key === 'changes')?.value || '',
+    /watchedAt:.*200 ms.*→.*300 ms/
+  )
+  const progressUpdate = plan.rows.find(row => row.title === 'Changed')
+  assert.equal(
+    progressUpdate?.detail,
+    'The source playback position differs beyond the sync tolerance.'
+  )
+  assert.match(
+    progressUpdate?.diagnostics.find(diagnostic => diagnostic.key === 'changes')?.value || '',
+    /progress: 50\.00% → 80\.00%.*positionMs: 50000 → 80000/
+  )
 })
 
 test('keeps collapsed history idempotent when only provider replay counts differ', () => {
@@ -322,6 +337,11 @@ test('migrates an existing Nuvio TMDB library identity to IMDb', () => {
   assert.equal(plan.stats.update, 1)
   assert.equal(plan.transfer.library.length, 1)
   assert.equal(plan.transfer.library[0].media.ids.imdb, 'tt2015381')
+  assert.match(plan.rows[0].detail, /migrated to IMDb/)
+  assert.match(
+    plan.rows[0].diagnostics.find(diagnostic => diagnostic.key === 'changes')?.value || '',
+    /stremio:tmdb:118340.*imdb:tt2015381/
+  )
 })
 
 test('plans a Nuvio library write to collapse mixed-ID duplicates', () => {
@@ -462,6 +482,11 @@ test('updates existing library records when source list provenance is missing at
   const plan = planMediaBridgePreview({ source, destination, scopes: ALL_SCOPES })
   assert.equal(plan.stats.update, 1)
   assert.equal(plan.transfer.library.length, 1)
+  assert.equal(plan.rows[0].detail, 'The destination is missing source list membership.')
+  assert.match(
+    plan.rows[0].diagnostics.find(diagnostic => diagnostic.key === 'changes')?.value || '',
+    /add memberships: collection/
+  )
 })
 
 test('treats the same native list kind on different accounts as already present', () => {
@@ -718,7 +743,11 @@ test('treats an existing destination episode as authoritative', () => {
   assert.equal(plan.rows[0].remapped, false)
   assert.equal(plan.rows[0].outcomeLabel, 'Update destination')
   assert.equal(plan.rows[0].title, 'Game of Thrones')
-  assert.equal(plan.rows[0].detail, 'Destination item already exists; only its sync state will be updated.')
+  assert.equal(plan.rows[0].detail, 'The source watched timestamp is newer.')
+  assert.deepEqual(
+    plan.rows[0].diagnostics.map(diagnostic => diagnostic.key),
+    ['updateReason', 'sourceState', 'destinationState', 'changes', 'sourceIds', 'destinationIds']
+  )
   assert.deepEqual(plan.transfer.history[0].media, destinationMedia)
 })
 

@@ -313,7 +313,7 @@ test('normalizes titles and maps deterministic video, numbering, title, and abso
     { season: 1, episode: 2, title: 'The Return' },
     [{ season: 1, episode: 2, title: 'The Return' }],
     [
-      { season: 1, episode: 2, title: 'Another Story' },
+      { season: 2, episode: 2, title: 'Another Story' },
       { season: 1, episode: 3, title: 'The Return!' }
     ]
   )
@@ -370,16 +370,24 @@ test('never guesses an episode by ordered position after deterministic matches f
   assert.deepEqual(ordinalOnly.evidence?.absoluteMatches, [])
 
   const conflictingCoordinateTitle = remapEpisode(
-    { season: 1, episode: 5, title: 'The Wolf and the Lion', videoId: 'source:5' },
-    [{ season: 1, episode: 5, title: 'The Wolf and the Lion', videoId: 'source:5' }],
-    [{ season: 1, episode: 5, title: 'Episode Five', videoId: 'destination:5' }]
+    { season: 1, episode: 10, absoluteEpisode: 10, title: 'Mercy', videoId: 'trakt:2894537' },
+    [{ season: 1, episode: 10, absoluteEpisode: 10, title: 'Mercy', videoId: 'trakt:2894537' }],
+    [{ season: 1, episode: 10, title: 'Mercy (1)', videoId: 'tt7221388:1:10' }]
   )
-  assert.equal(conflictingCoordinateTitle.status, 'unresolved')
+  assert.equal(conflictingCoordinateTitle.status, 'mapped')
+  assert.equal(conflictingCoordinateTitle.confidence, 'high')
+  assert.equal(conflictingCoordinateTitle.reason, 'Season and episode numbering match; provider episode titles differ.')
+  assert.deepEqual(conflictingCoordinateTitle.target, {
+    season: 1,
+    episode: 10,
+    title: 'Mercy (1)',
+    videoId: 'tt7221388:1:10'
+  })
   assert.deepEqual(conflictingCoordinateTitle.evidence?.coordinateMatches, [{
     season: 1,
-    episode: 5,
-    title: 'Episode Five',
-    videoId: 'destination:5'
+    episode: 10,
+    title: 'Mercy (1)',
+    videoId: 'tt7221388:1:10'
   }])
   assert.deepEqual(conflictingCoordinateTitle.evidence?.titleMatches, [])
 

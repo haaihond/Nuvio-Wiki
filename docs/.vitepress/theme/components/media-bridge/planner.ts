@@ -50,6 +50,12 @@ export type PreviewDiagnosticKey =
   | 'coordinateMatches'
   | 'absoluteMatches'
   | 'titleMatches'
+  | 'updateReason'
+  | 'sourceState'
+  | 'destinationState'
+  | 'changes'
+  | 'sourceIds'
+  | 'destinationIds'
 
 export interface PreviewDiagnostic {
   readonly key: PreviewDiagnosticKey
@@ -342,6 +348,149 @@ function mappingEvidenceDiagnostics(
     diagnostics.push({ key: 'absoluteMatches', value: episodeRefsLabel(evidence.absoluteMatches) })
     diagnostics.push({ key: 'titleMatches', value: episodeRefsLabel(evidence.titleMatches) })
   }
+  return diagnostics
+}
+
+function timestampLabel(value: number): string {
+  if (!Number.isFinite(value)) return 'Unavailable'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime())
+    ? `${value} ms`
+    : `${date.toISOString()} (${value} ms)`
+}
+
+function progressStateLabel(record: ProgressRecord): string {
+  const parts: string[] = []
+  const percentage = progressPercentage(record)
+  if (percentage !== null) parts.push(`${percentage.toFixed(2)}%`)
+  if (Number.isFinite(Number(record.positionMs))) parts.push(`position ${record.positionMs} ms`)
+  if (Number.isFinite(Number(record.durationMs))) parts.push(`duration ${record.durationMs} ms`)
+  parts.push(`updated ${timestampLabel(record.updatedAt)}`)
+  return parts.join(' · ')
+}
+
+function listProvenanceLabel(record: LibraryRecord): string {
+  if (!record.lists.length) return 'None'
+  return record.lists.map(list => {
+    const details = [list.service, list.kind]
+    if (list.name) details.push(`“${list.name}”`)
+    if (list.listId) details.push(`ID ${list.listId}`)
+    return details.join(' · ')
+  }).join(' | ')
+}
+
+function libraryComparison(
+  source: LibraryRecord,
+  destination: LibraryRecord
+): { missing: string[]; sourceKeys: string[]; destinationKeys: string[] } {
+  const collapseGenericMembership = !(
+    hasOnlyTraktProvenance(source) && hasOnlyTraktProvenance(destination)
+  )
+  const sourceKeys = listIdentity(source, collapseGenericMembership)
+  const destinationKeys = listIdentity(destination, collapseGenericMembership)
+  const destinationSet = new Set(destinationKeys)
+  return {
+    missing: sourceKeys.filter(list => !destinationSet.has(list)),
+    sourceKeys,
+    destinationKeys
+  }
+}
+
+function updateDiagnostics(
+  scope: BridgeScope,
+  source: ScopedRecord,
+  destination: ScopedRecord,
+  options: { nuvioDuplicateCleanup: boolean }
+): PreviewDiagnostic[] {
+  const diagnostics: PreviewDiagnostic[] = []
+  const reasons: string[] = []
+  const changes: string[] = []
+
+  if (scope === 'history') {
+    const sourceHistory = source as HistoryRecord
+    const destinationHistory = destination as HistoryRecord
+    reasons.push('The source watched timestamp is newer.')
+    changes.push(
+      `watchedAt: ${timestampLabel(destinationHistory.watchedAt)} → ${timestampLabel(sourceHistory.watchedAt)}`
+    )
+    diagnostics.push(
+      { key: 'sourceState', value: `watched ${timestampLabel(sourceHistory.watchedAt)}` },
+      { key: 'destinationState', value: `watched ${timestampLabel(destinationHistory.watchedAt)}` }
+    )
+  } else if (scope === 'progress') {
+    const sourceProgress = source as ProgressRecord
+    const destinationProgress = destination as ProgressRecord
+    reasons.push(
+      sourceProgress.updatedAt > destinationProgress.updatedAt
+        ? 'The source playback state is newer and differs beyond the sync tolerance.'
+        : 'The source playback position differs beyond the sync tolerance.'
+    )
+    const sourcePercentage = progressPercentage(sourceProgress)
+    const destinationPercentage = progressPercentage(destinationProgress)
+    if (
+      sourcePercentage !== null
+      && destinationPercentage !== null
+      && sourcePercentage !== destinationPercentage
+    ) {
+      changes.push(`progress: ${destinationPercentage.toFixed(2)}% → ${sourcePercentage.toFixed(2)}%`)
+    }
+    if (sourceProgress.positionMs !== destinationProgress.positionMs) {
+      changes.push(`positionMs: ${destinationProgress.positionMs ?? 'none'} → ${sourceProgress.positionMs ?? 'none'}`)
+    }
+    if (sourceProgress.durationMs !== destinationProgress.durationMs) {
+      changes.push(`durationMs: ${destinationProgress.durationMs ?? 'none'} → ${sourceProgress.durationMs ?? 'none'}`)
+    }
+    if (sourceProgress.updatedAt !== destinationProgress.updatedAt) {
+      changes.push(
+        `updatedAt: ${timestampLabel(destinationProgress.updatedAt)} → ${timestampLabel(sourceProgress.updatedAt)}`
+      )
+    }
+    diagnostics.push(
+      { key: 'sourceState', value: progressStateLabel(sourceProgress) },
+      { key: 'destinationState', value: progressStateLabel(destinationProgress) }
+    )
+  } else {
+    const sourceLibrary = source as LibraryRecord
+    const destinationLibrary = destination as LibraryRecord
+    const lists = libraryComparison(sourceLibrary, destinationLibrary)
+    if (needsNuvioLibraryImdbUpgrade(sourceLibrary, destinationLibrary)) {
+      reasons.push('The existing Nuvio item uses a non-IMDb identity and will be migrated to IMDb.')
+      changes.push(
+        `destination identity: ${mediaIdsLabel(destinationLibrary.media.ids)} → ${mediaIdsLabel(sourceLibrary.media.ids)}`
+      )
+    }
+    if (options.nuvioDuplicateCleanup) {
+      reasons.push('The destination contains duplicate Nuvio identities for this title.')
+      changes.push('collapse duplicate destination rows into the canonical IMDb identity')
+    }
+    if (sourceLibrary.addedAt > destinationLibrary.addedAt) {
+      reasons.push('The source saved-title timestamp is newer.')
+      changes.push(
+        `addedAt: ${timestampLabel(destinationLibrary.addedAt)} → ${timestampLabel(sourceLibrary.addedAt)}`
+      )
+    }
+    if (lists.missing.length) {
+      reasons.push('The destination is missing source list membership.')
+      changes.push(`add memberships: ${lists.missing.join(', ')}; preserve destination-only memberships`)
+    }
+    diagnostics.push(
+      {
+        key: 'sourceState',
+        value: `added ${timestampLabel(sourceLibrary.addedAt)} · memberships ${listProvenanceLabel(sourceLibrary)}`
+      },
+      {
+        key: 'destinationState',
+        value: `added ${timestampLabel(destinationLibrary.addedAt)} · memberships ${listProvenanceLabel(destinationLibrary)}`
+      }
+    )
+  }
+
+  diagnostics.unshift({ key: 'updateReason', value: reasons.join(' ') || 'The source sync state differs.' })
+  diagnostics.push(
+    { key: 'changes', value: changes.join(' | ') || 'Provider sync state will be refreshed.' },
+    { key: 'sourceIds', value: mediaIdsLabel(source.media.ids) },
+    { key: 'destinationIds', value: mediaIdsLabel(destination.media.ids) }
+  )
   return diagnostics
 }
 
@@ -711,13 +860,18 @@ export function planMediaBridgePreview(input: MediaBridgePlanInput): MediaBridge
           )
         : findDestinationRecord(destinationByScope[scope], mappedMedia, scope, sourceIdentity)
       let outcome = classifyRecord(scope, plannedRecord, destinationRecord)
-      if (
+      const nuvioDuplicateCleanup = Boolean(
         scope === 'library'
         && input.destinationService === 'nuvio'
         && recordAliasKeys(mappedMedia, sourceIdentity).some(alias => duplicateNuvioLibraryAliases.has(alias))
-      ) {
+      )
+      if (nuvioDuplicateCleanup) {
         outcome = 'update'
       }
+      const diagnostics = outcome === 'update' && destinationRecord
+        ? updateDiagnostics(scope, plannedRecord, destinationRecord, { nuvioDuplicateCleanup })
+        : []
+      const updateReason = diagnostics.find(diagnostic => diagnostic.key === 'updateReason')?.value
       // Existing destination records are authoritative. Provider ID, title, and
       // absolute-number translations must neither overwrite them nor count as a
       // remap. Only a newly added record with changed visible coordinates is a
@@ -755,9 +909,9 @@ export function planMediaBridgePreview(input: MediaBridgePlanInput): MediaBridge
         detail: destinationRecord
           ? outcome === 'already-present'
             ? 'Destination item already exists and is unchanged.'
-            : 'Destination item already exists; only its sync state will be updated.'
+            : updateReason || 'Destination item already exists; only its sync state will be updated.'
           : issue?.mapping.reason || outcomeLabel(outcome, false),
-        diagnostics: []
+        diagnostics
       })
     }
   }

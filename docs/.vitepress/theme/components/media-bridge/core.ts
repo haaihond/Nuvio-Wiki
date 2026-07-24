@@ -969,11 +969,12 @@ export function remapEpisode(
   }
   if (coordinateMatches.length === 1) {
     const targetTitle = meaningfulEpisodeTitle(coordinateMatches[0].title)
-    if (!sourceTitle || !targetTitle || sourceTitle === targetTitle) {
-      return {
-        ...mapped('high', coordinateMatches[0], 'Season and episode numbering match.'),
-        evidence
-      }
+    const reason = sourceTitle && targetTitle && sourceTitle !== targetTitle
+      ? 'Season and episode numbering match; provider episode titles differ.'
+      : 'Season and episode numbering match.'
+    return {
+      ...mapped('high', coordinateMatches[0], reason),
+      evidence
     }
   }
 

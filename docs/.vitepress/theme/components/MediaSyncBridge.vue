@@ -118,6 +118,12 @@ const copy = computed(() => isDutch.value ? {
   diagCoordinateMatches: 'Overeenkomsten op seizoen/aflevering',
   diagAbsoluteMatches: 'Overeenkomsten op absoluut nummer',
   diagTitleMatches: 'Overeenkomsten op titel',
+  diagUpdateReason: 'Reden voor bijwerken',
+  diagSourceState: 'Bronstatus',
+  diagDestinationState: 'Huidige bestemmingsstatus',
+  diagChanges: 'Geplande wijzigingen',
+  diagSourceIds: 'Bron-ID’s',
+  diagDestinationIds: 'Bestemmings-ID’s',
   previous: 'Vorige',
   next: 'Volgende',
   page: 'Pagina',
@@ -213,6 +219,12 @@ const copy = computed(() => isDutch.value ? {
   diagCoordinateMatches: 'Season/episode matches',
   diagAbsoluteMatches: 'Absolute-number matches',
   diagTitleMatches: 'Episode-title matches',
+  diagUpdateReason: 'Why this updates',
+  diagSourceState: 'Source state',
+  diagDestinationState: 'Current destination state',
+  diagChanges: 'Planned changes',
+  diagSourceIds: 'Source IDs',
+  diagDestinationIds: 'Destination IDs',
   previous: 'Previous',
   next: 'Next',
   page: 'Page',
@@ -408,7 +420,13 @@ function diagnosticLabel(key: PreviewDiagnosticKey): string {
     videoIdMatches: copy.value.diagVideoIdMatches,
     coordinateMatches: copy.value.diagCoordinateMatches,
     absoluteMatches: copy.value.diagAbsoluteMatches,
-    titleMatches: copy.value.diagTitleMatches
+    titleMatches: copy.value.diagTitleMatches,
+    updateReason: copy.value.diagUpdateReason,
+    sourceState: copy.value.diagSourceState,
+    destinationState: copy.value.diagDestinationState,
+    changes: copy.value.diagChanges,
+    sourceIds: copy.value.diagSourceIds,
+    destinationIds: copy.value.diagDestinationIds
   }
   return labels[key]
 }
