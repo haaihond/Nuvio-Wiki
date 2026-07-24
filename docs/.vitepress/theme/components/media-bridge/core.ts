@@ -767,6 +767,21 @@ export interface EpisodeMappingEvidence {
   coordinateMatches: readonly EpisodeRef[]
   absoluteMatches: readonly EpisodeRef[]
   titleMatches: readonly EpisodeRef[]
+  fuzzyTitleMatches?: readonly EpisodeSimilarityMatch[]
+  sequenceCandidate?: EpisodeRef | null
+  sequenceAnchors?: readonly EpisodeSequenceAnchor[]
+}
+
+export interface EpisodeSimilarityMatch {
+  episode: EpisodeRef
+  similarity: number
+}
+
+export interface EpisodeSequenceAnchor {
+  source: EpisodeRef
+  target: EpisodeRef
+  sourceIndex: number
+  targetIndex: number
 }
 
 type MappingEvidenceCarrier = {
@@ -815,6 +830,136 @@ function meaningfulEpisodeTitle(value: unknown): string {
   const normalized = normalizeTitle(value)
   if (!normalized || /^(episode|ep|e|chapter|aflevering)\s*\d+$/.test(normalized)) return ''
   return normalized
+}
+
+const FUZZY_TITLE_THRESHOLD = 0.94
+const SEQUENCE_TITLE_THRESHOLD = 0.72
+const MAX_SEQUENCE_ANCHOR_DISTANCE = 5
+
+function fuzzyTitleEligible(title: string): boolean {
+  return title.length >= 12 && title.split(' ').filter(Boolean).length >= 3
+}
+
+function boundedLevenshteinDistance(
+  left: string,
+  right: string,
+  maxDistance: number
+): number | null {
+  if (Math.abs(left.length - right.length) > maxDistance) return null
+  if (left === right) return 0
+
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index)
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex++) {
+    const current = [leftIndex]
+    let rowMinimum = current[0]
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex++) {
+      const substitutionCost = left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1
+      const distance = Math.min(
+        previous[rightIndex] + 1,
+        current[rightIndex - 1] + 1,
+        previous[rightIndex - 1] + substitutionCost
+      )
+      current.push(distance)
+      rowMinimum = Math.min(rowMinimum, distance)
+    }
+    if (rowMinimum > maxDistance) return null
+    previous = current
+  }
+  return previous[right.length] <= maxDistance ? previous[right.length] : null
+}
+
+function episodeTitleSimilarity(
+  left: string,
+  right: string,
+  threshold: number
+): number | null {
+  if (!fuzzyTitleEligible(left) || !fuzzyTitleEligible(right)) return null
+  const maximumLength = Math.max(left.length, right.length)
+  const maximumDistance = Math.floor(maximumLength * (1 - threshold))
+  const distance = boundedLevenshteinDistance(left, right, maximumDistance)
+  return distance === null ? null : 1 - (distance / maximumLength)
+}
+
+function fuzzyEpisodeTitleMatches(
+  sourceTitle: string,
+  targetEpisodes: readonly EpisodeRef[]
+): EpisodeSimilarityMatch[] {
+  if (!fuzzyTitleEligible(sourceTitle)) return []
+  return targetEpisodes
+    .map(episode => {
+      const targetTitle = meaningfulEpisodeTitle(episode.title)
+      const similarity = episodeTitleSimilarity(sourceTitle, targetTitle, FUZZY_TITLE_THRESHOLD)
+      return similarity === null ? null : { episode, similarity }
+    })
+    .filter((match): match is EpisodeSimilarityMatch => Boolean(match))
+    .sort((left, right) => (
+      right.similarity - left.similarity || episodeSort(left.episode, right.episode)
+    ))
+}
+
+function uniqueTitleIndexes(episodes: readonly EpisodeRef[]): Map<string, number> {
+  const occurrences = new Map<string, number[]>()
+  episodes.forEach((episode, index) => {
+    const title = meaningfulEpisodeTitle(episode.title)
+    if (!fuzzyTitleEligible(title)) return
+    const indexes = occurrences.get(title) || []
+    indexes.push(index)
+    occurrences.set(title, indexes)
+  })
+  const unique = new Map<string, number>()
+  for (const [title, indexes] of occurrences) {
+    if (indexes.length === 1) unique.set(title, indexes[0])
+  }
+  return unique
+}
+
+function anchoredSequenceCandidate(
+  source: EpisodeRef,
+  sourceEpisodes: readonly EpisodeRef[],
+  targetEpisodes: readonly EpisodeRef[]
+): { candidate: EpisodeRef | null; anchors: EpisodeSequenceAnchor[] } {
+  const orderedSource = sortedEpisodes(sourceEpisodes)
+  const orderedTarget = sortedEpisodes(targetEpisodes)
+  const sourceIndex = orderedSource.indexOf(source)
+  if (sourceIndex < 0) return { candidate: null, anchors: [] }
+
+  const sourceTitles = uniqueTitleIndexes(orderedSource)
+  const targetTitles = uniqueTitleIndexes(orderedTarget)
+  const anchors: EpisodeSequenceAnchor[] = []
+  for (const [title, anchorSourceIndex] of sourceTitles) {
+    const targetIndex = targetTitles.get(title)
+    if (targetIndex === undefined || anchorSourceIndex === sourceIndex) continue
+    anchors.push({
+      source: orderedSource[anchorSourceIndex],
+      target: orderedTarget[targetIndex],
+      sourceIndex: anchorSourceIndex,
+      targetIndex
+    })
+  }
+  anchors.sort((left, right) => left.sourceIndex - right.sourceIndex)
+
+  const before = [...anchors].reverse().find(anchor => anchor.sourceIndex < sourceIndex)
+  const after = anchors.find(anchor => anchor.sourceIndex > sourceIndex)
+  if (!before || !after) return { candidate: null, anchors: [] }
+
+  const beforeDistance = sourceIndex - before.sourceIndex
+  const afterDistance = after.sourceIndex - sourceIndex
+  const sourceSpan = after.sourceIndex - before.sourceIndex
+  const targetSpan = after.targetIndex - before.targetIndex
+  if (
+    beforeDistance > MAX_SEQUENCE_ANCHOR_DISTANCE
+    || afterDistance > MAX_SEQUENCE_ANCHOR_DISTANCE
+    || sourceSpan !== targetSpan
+    || targetSpan <= 1
+  ) return { candidate: null, anchors: [before, after] }
+
+  const candidateIndex = before.targetIndex + beforeDistance
+  const candidate = orderedTarget[candidateIndex]
+  const sourceTitle = meaningfulEpisodeTitle(source.title)
+  const targetTitle = meaningfulEpisodeTitle(candidate?.title)
+  const similarity = episodeTitleSimilarity(sourceTitle, targetTitle, SEQUENCE_TITLE_THRESHOLD)
+  if (!candidate || similarity === null) return { candidate: null, anchors: [before, after] }
+  return { candidate, anchors: [before, after] }
 }
 
 function ambiguous(
@@ -1004,13 +1149,58 @@ export function remapEpisode(
     }
   }
 
+  const fuzzyTitleMatches = sourceTitle
+    ? fuzzyEpisodeTitleMatches(sourceTitle, targetEpisodes)
+    : []
+  const fuzzyEvidence: EpisodeMappingEvidence = {
+    ...evidence,
+    fuzzyTitleMatches
+  }
+  if (fuzzyTitleMatches.length === 1) {
+    return {
+      ...mapped(
+        'high',
+        fuzzyTitleMatches[0].episode,
+        `A unique highly similar episode title matched (${Math.round(fuzzyTitleMatches[0].similarity * 100)}%).`
+      ),
+      evidence: fuzzyEvidence
+    }
+  }
+  if (fuzzyTitleMatches.length > 1) {
+    return {
+      ...ambiguous(
+        'high',
+        fuzzyTitleMatches.map(match => match.episode),
+        'Multiple destination episodes have highly similar titles.'
+      ),
+      evidence: fuzzyEvidence
+    }
+  }
+
+  const sequence = anchoredSequenceCandidate(source, sourceEpisodes, targetEpisodes)
+  const sequenceEvidence: EpisodeMappingEvidence = {
+    ...fuzzyEvidence,
+    sequenceCandidate: sequence.candidate,
+    sequenceAnchors: sequence.anchors
+  }
+  if (sequence.candidate) {
+    return {
+      ...mapped(
+        'medium',
+        sequence.candidate,
+        'Nearby unique episode titles confirm the same sequence position across differently numbered catalogs.'
+      ),
+      evidence: sequenceEvidence
+    }
+  }
+
   return {
     status: 'unresolved',
     confidence: 'none',
     target: null,
     candidates: [],
     reason: 'No deterministic episode mapping was found.',
-    evidence
+    evidence: sequenceEvidence
   }
 }
 

@@ -13,6 +13,8 @@ import {
   type ConnectedEndpoint,
   type EpisodeMappingEvidence,
   type EpisodeRef,
+  type EpisodeSequenceAnchor,
+  type EpisodeSimilarityMatch,
   type HistoryRecord,
   type LibraryRecord,
   type MappingConfidence,
@@ -50,6 +52,9 @@ export type PreviewDiagnosticKey =
   | 'coordinateMatches'
   | 'absoluteMatches'
   | 'titleMatches'
+  | 'fuzzyTitleMatches'
+  | 'sequenceCandidate'
+  | 'sequenceAnchors'
   | 'updateReason'
   | 'sourceState'
   | 'destinationState'
@@ -295,6 +300,23 @@ function episodeRefsLabel(episodes: readonly EpisodeRef[]): string {
   return episodes.length ? episodes.map(episodeRefLabel).join(' | ') : 'None'
 }
 
+function similarityMatchesLabel(matches: readonly EpisodeSimilarityMatch[]): string {
+  return matches.length
+    ? matches.map(match => (
+        `${episodeRefLabel(match.episode)} · ${(match.similarity * 100).toFixed(1)}% similar`
+      )).join(' | ')
+    : 'None'
+}
+
+function sequenceAnchorsLabel(anchors: readonly EpisodeSequenceAnchor[]): string {
+  return anchors.length
+    ? anchors.map(anchor => (
+        `${episodeRefLabel(anchor.source)} [source position ${anchor.sourceIndex + 1}] → `
+        + `${episodeRefLabel(anchor.target)} [destination position ${anchor.targetIndex + 1}]`
+      )).join(' | ')
+    : 'None'
+}
+
 function mediaIdsLabel(ids: MediaIds): string {
   const values: string[] = []
   for (const namespace of ['imdb', 'tmdb', 'tvdb', 'trakt', 'simkl', 'plex', 'jellyfin', 'stremio', 'slug'] as const) {
@@ -347,6 +369,24 @@ function mappingEvidenceDiagnostics(
     diagnostics.push({ key: 'coordinateMatches', value: episodeRefsLabel(evidence.coordinateMatches) })
     diagnostics.push({ key: 'absoluteMatches', value: episodeRefsLabel(evidence.absoluteMatches) })
     diagnostics.push({ key: 'titleMatches', value: episodeRefsLabel(evidence.titleMatches) })
+    if (evidence.fuzzyTitleMatches) {
+      diagnostics.push({
+        key: 'fuzzyTitleMatches',
+        value: similarityMatchesLabel(evidence.fuzzyTitleMatches)
+      })
+    }
+    if (evidence.sequenceCandidate !== undefined) {
+      diagnostics.push({
+        key: 'sequenceCandidate',
+        value: episodeRefLabel(evidence.sequenceCandidate)
+      })
+    }
+    if (evidence.sequenceAnchors) {
+      diagnostics.push({
+        key: 'sequenceAnchors',
+        value: sequenceAnchorsLabel(evidence.sequenceAnchors)
+      })
+    }
   }
   return diagnostics
 }

@@ -330,6 +330,85 @@ test('normalizes titles and maps deterministic video, numbering, title, and abso
   assert.equal(byAbsolute.confidence, 'medium')
 })
 
+test('maps alternate anime numbering only with strong title or sequence evidence', () => {
+  const onePiece = remapEpisode(
+    {
+      season: 3,
+      episode: 82,
+      absoluteEpisode: 82,
+      title: "Dalton's Resolve! Wapol's Corps Lands on the Island!",
+      videoId: 'trakt:856291'
+    },
+    [{
+      season: 3,
+      episode: 82,
+      absoluteEpisode: 82,
+      title: "Dalton's Resolve! Wapol's Corps Lands on the Island!",
+      videoId: 'trakt:856291'
+    }],
+    [
+      { season: 3, episode: 4, title: 'An Unrelated Episode', videoId: 'tt0388629:3:4' },
+      {
+        season: 3,
+        episode: 5,
+        title: "Dalton's Resolve! Wapol's Corps Land on the Island!",
+        videoId: 'tt0388629:3:5'
+      }
+    ]
+  )
+  assert.equal(onePiece.status, 'mapped')
+  assert.equal(onePiece.confidence, 'high')
+  assert.equal(onePiece.target?.videoId, 'tt0388629:3:5')
+  assert.match(onePiece.reason, /highly similar episode title/)
+  assert.equal(onePiece.evidence?.fuzzyTitleMatches?.length, 1)
+  assert.ok((onePiece.evidence?.fuzzyTitleMatches?.[0].similarity || 0) > 0.97)
+
+  const duplicateNearTitles = remapEpisode(
+    { season: 3, episode: 82, title: "Dalton's Resolve! Wapol's Corps Lands on the Island!" },
+    [{ season: 3, episode: 82, title: "Dalton's Resolve! Wapol's Corps Lands on the Island!" }],
+    [
+      { season: 1, episode: 82, title: "Dalton's Resolve! Wapol's Corps Land on the Island!" },
+      { season: 3, episode: 5, title: "Dalton's Resolve! Wapol's Corps Land on the Island!" }
+    ]
+  )
+  assert.equal(duplicateNearTitles.status, 'ambiguous')
+  assert.equal(duplicateNearTitles.candidates.length, 2)
+
+  const sourceSequence: EpisodeRef[] = [
+    { season: 3, episode: 80, title: 'Before the Snow Falls' },
+    { season: 3, episode: 82, title: 'The Battle Begins at Dawn', videoId: 'source:current' },
+    { season: 3, episode: 83, title: 'Climbing the Frozen Mountain' }
+  ]
+  const anchored = remapEpisode(
+    { season: 3, episode: 82, title: 'The Battle Begins at Dawn', videoId: 'source:current' },
+    sourceSequence,
+    [
+      { season: 1, episode: 10, title: 'Before the Snow Falls' },
+      { season: 1, episode: 11, title: 'Battle Begins at Dawn', videoId: 'target:current' },
+      { season: 1, episode: 12, title: 'Climbing the Frozen Mountain' }
+    ]
+  )
+  assert.equal(anchored.status, 'mapped')
+  assert.equal(anchored.confidence, 'medium')
+  assert.equal(anchored.target?.videoId, 'target:current')
+  assert.match(anchored.reason, /Nearby unique episode titles/)
+  assert.equal(anchored.evidence?.sequenceAnchors?.length, 2)
+
+  const unsafeOrdinal = remapEpisode(
+    { season: 3, episode: 82, title: 'The Battle Begins at Dawn', videoId: 'source:current' },
+    sourceSequence,
+    [
+      { season: 1, episode: 10, title: 'Before the Snow Falls' },
+      { season: 1, episode: 11, title: 'A Completely Different Story', videoId: 'wrong:episode' },
+      { season: 1, episode: 12, title: 'Climbing the Frozen Mountain' }
+    ]
+  )
+  assert.equal(unsafeOrdinal.status, 'unresolved')
+  assert.equal(unsafeOrdinal.target, null)
+  assert.equal(unsafeOrdinal.evidence?.sequenceCandidate, null)
+  assert.equal(unsafeOrdinal.evidence?.sequenceAnchors?.length, 2)
+})
+
 test('never guesses an episode by ordered position after deterministic matches fail', () => {
   const duplicateTitle = remapEpisode(
     { season: 1, episode: 3, title: 'Finale' },
