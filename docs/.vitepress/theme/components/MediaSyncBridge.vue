@@ -16,16 +16,13 @@ import {
   summarizeScopes,
   validateEndpointPair,
   type BridgeSlot,
-  type CanonicalBundle,
   type ServiceId,
   type SyncScopes
 } from './mediaBridgeCore'
 import {
-  planMediaBridgePreview,
   type MediaBridgePreviewPlan
 } from './mediaBridgePlan'
 import {
-  createMediaBridgeVerificationCheckpoint,
   createJellyfinConnection,
   createNuvioConnection,
   createPlexConnection,
@@ -34,10 +31,6 @@ import {
   createStremioLinkedConnection,
   createStremioConnection,
   identifyOAuthConnection,
-  inspectDestinationMappings,
-  pullMediaBridge,
-  pullMediaBridgeForVerification,
-  pushMediaBridge,
   readPlexPinLink,
   readStremioDeviceLink,
   signInNuvio,
@@ -53,6 +46,7 @@ import {
   type StremioDeviceLink,
   type TraktCredentials
 } from './mediaBridgeProviders'
+import { mediaBridgeEngine } from './media-bridge/engine'
 
 const props = withDefaults(defineProps<{
   defaultExpanded?: boolean
@@ -773,36 +767,16 @@ async function preparePlan(
   destinationConnection: BridgeConnection,
   requestedScopes: SyncScopes
 ) {
-  const [sourceResult, destinationResult] = await Promise.all([
-    pullMediaBridge({ connection: sourceConnection, scopes: requestedScopes, log: appendLog }),
-    pullMediaBridge({ connection: destinationConnection, scopes: requestedScopes, log: appendLog })
-  ])
-  const mappingIssues = await inspectDestinationMappings(
-    destinationConnection,
-    sourceResult.bundle,
-    requestedScopes,
-    appendLog,
-    sourceConnection
-  )
-  const plan = planMediaBridgePreview({
-    source: sourceResult.bundle,
-    destination: destinationResult.bundle,
-    destinationService: destinationConnection.service,
+  const prepared = await mediaBridgeEngine.preview({
+    source: sourceConnection,
+    destination: destinationConnection,
     scopes: requestedScopes,
-    mappingIssues
+    log: appendLog
   })
-  const planIssues: BridgeIssue[] = plan.rows
-    .filter(row => row.outcome === 'unresolved' || row.outcome === 'ambiguous')
-    .map(row => ({
-      scope: row.scope,
-      status: row.outcome as 'unresolved' | 'ambiguous',
-      media: row.media,
-      reason: row.detail
-    }))
   return {
-    plan,
-    destination: destinationResult.bundle,
-    issues: [...sourceResult.issues, ...destinationResult.issues, ...planIssues]
+    plan: prepared.plan,
+    destination: prepared.destination,
+    issues: prepared.issues
   }
 }
 
@@ -853,14 +827,6 @@ async function buildPreview() {
   }
 }
 
-function mutableTransfer(plan: MediaBridgePreviewPlan): CanonicalBundle {
-  return {
-    history: [...plan.transfer.history],
-    progress: [...plan.transfer.progress],
-    library: [...plan.transfer.library]
-  }
-}
-
 async function runSync() {
   if (!canSync.value || !connections.source || !connections.destination) return
   const sourceConnection = connections.source
@@ -877,84 +843,31 @@ async function runSync() {
   openSyncView()
   appendLog(`Comparing source and destination for ${routeName.value}...`)
   try {
-    // Build a fresh plan for every run. This makes preview optional and avoids
-    // reusing stale writes on providers whose history endpoints are append-only.
-    const prepared = await preparePlan(sourceConnection, destinationConnection, requestedScopes)
-    providerIssues.value = prepared.issues
+    // The engine always takes fresh snapshots. Preview stays optional and no
+    // stale append-only history plan can be reused by a later run.
+    const result = await mediaBridgeEngine.run({
+      source: sourceConnection,
+      destination: destinationConnection,
+      scopes: requestedScopes,
+      log: appendLog,
+      onEvent(event) {
+        if (event.phase === 'write') statusMessage.value = copy.value.syncing
+        if (event.phase === 'verify') statusMessage.value = copy.value.verifyingSync
+      }
+    })
+    const prepared = result.prepared
+    providerIssues.value = [...prepared.issues, ...result.issues]
     appendIssueLogs(prepared.issues)
-    const transfer = mutableTransfer(prepared.plan)
+    appendIssueLogs(result.issues)
     const changes = planTransferCount(prepared.plan)
     appendLog(`Comparison complete: ${changes} changes are ready; ${prepared.plan.stats.skipped} items were skipped.`)
     if (changes === 0) {
-      syncResult.value = {
-        written: { history: 0, progress: 0, library: 0 },
-        issues: []
-      }
+      syncResult.value = result
       statusMessage.value = copy.value.noChanges
       return
     }
 
-    const verificationCheckpoint = await createMediaBridgeVerificationCheckpoint({
-      connection: destinationConnection,
-      log: appendLog
-    })
-    statusMessage.value = copy.value.syncing
-    appendLog(`Writing changes to ${SERVICE_DEFINITIONS[destinationConnection.service].label}...`)
-    const result = await pushMediaBridge({
-      connection: destinationConnection,
-      bundle: transfer,
-      scopes: requestedScopes,
-      log: appendLog
-    })
-    const confirmedScopes = new Set(result.confirmedScopes || [])
-    const verificationScopes: SyncScopes = {
-      history: requestedScopes.history && transfer.history.length > 0 && !confirmedScopes.has('history'),
-      progress: requestedScopes.progress && transfer.progress.length > 0 && !confirmedScopes.has('progress'),
-      library: requestedScopes.library && transfer.library.length > 0 && !confirmedScopes.has('library')
-    }
-    if (Object.values(verificationScopes).some(Boolean)) {
-      appendLog('Verifying unconfirmed destination writes...')
-      statusMessage.value = copy.value.verifyingSync
-      const verified = await pullMediaBridgeForVerification({
-        connection: destinationConnection,
-        scopes: verificationScopes,
-        log: appendLog,
-        baseline: prepared.destination,
-        checkpoint: verificationCheckpoint
-      })
-      const remaining = planMediaBridgePreview({
-        source: transfer,
-        destination: verified.bundle,
-        destinationService: destinationConnection.service,
-        scopes: verificationScopes
-      })
-      for (const scope of ['history', 'progress', 'library'] as const) {
-        if (!verificationScopes[scope]) continue
-        // Provider sync endpoints can return HTTP success with per-item misses.
-        // Count only records observed in the destination refresh.
-        result.written[scope] = Math.max(
-          0,
-          transfer[scope].length - remaining.transfer[scope].length
-        )
-        const unconfirmed = Math.max(
-          0,
-          remaining.transfer[scope].length - (result.skipped?.[scope] || 0)
-        )
-        if (unconfirmed > 0) {
-          result.issues.push({
-            scope,
-            status: 'warning',
-            reason: `${unconfirmed} ${formatScope(scope).toLowerCase()} record${unconfirmed === 1 ? '' : 's'} could not be confirmed after verification.`
-          })
-        }
-      }
-      result.issues.push(...verified.issues)
-    } else {
-      appendLog('Destination write responses confirmed every submitted record.')
-    }
     syncResult.value = result
-    providerIssues.value = [...providerIssues.value, ...result.issues]
-    appendIssueLogs(result.issues)
     appendLog(`Sync finished. Wrote ${result.written.history} history, ${result.written.progress} progress, and ${result.written.library} saved-title records.`)
     statusMessage.value = syncHasWarnings.value ? copy.value.finishedWarnings : copy.value.result
   } catch (error: any) {

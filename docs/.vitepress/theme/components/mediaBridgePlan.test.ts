@@ -593,14 +593,14 @@ test('applies a deterministic episode remap before comparison and transfer', () 
   const sourceMedia = episode('tt501', 'Remapped Show', 1, 2)
   source.history.push({ media: sourceMedia, watchedAt: 500 })
   const mapping = remapEpisode(
-    { season: 1, episode: 2 },
+    { season: 1, episode: 2, absoluteEpisode: 10 },
     [
       { season: 1, episode: 1 },
-      { season: 1, episode: 2 }
+      { season: 1, episode: 2, absoluteEpisode: 10 }
     ],
     [
       { season: 4, episode: 7 },
-      { season: 4, episode: 8 }
+      { season: 4, episode: 8, absoluteEpisode: 10 }
     ]
   )
 
@@ -620,7 +620,7 @@ test('applies a deterministic episode remap before comparison and transfer', () 
   assert.equal(plan.transfer.history[0].media.season, 4)
   assert.equal(plan.transfer.history[0].media.episode, 8)
   assert.equal(plan.rows[0].remapped, true)
-  assert.equal(plan.rows[0].mappingConfidence, 'low')
+  assert.equal(plan.rows[0].mappingConfidence, 'medium')
   assert.equal(plan.rows[0].title, 'Remapped Show')
   assert.match(plan.rows[0].outcomeLabel, /remapped/)
   assert.notEqual(plan.rows[0].sourceKey, plan.rows[0].targetKey)
