@@ -72,6 +72,9 @@ const NUVIO_KITSU_SEARCH_CONCURRENCY = 6
 const NUVIO_KITSU_CANDIDATE_CONCURRENCY = 4
 const NUVIO_ADDON_MANIFEST_CONCURRENCY = 4
 const NUVIO_KITSU_PROGRESS_INTERVAL = 25
+const DESTINATION_MAPPING_CONCURRENCY = 6
+const DESTINATION_MAPPING_PROGRESS_INTERVAL = 10
+const DESTINATION_MAPPING_HEARTBEAT_MS = 15_000
 const LOCAL_SERVER_WRITE_CONCURRENCY = 4
 const NUVIO_WRITE_CONCURRENCY = 3
 const STREMIO_WRITE_CONCURRENCY = 2
@@ -5884,17 +5887,33 @@ export async function inspectDestinationMappings(
   const records = [...recordsByKey.values()]
   if (!records.length) return []
 
+  // Schedule metadata work by series, not by episode. Trakt history is often
+  // ordered in binge-sized blocks; limiting the raw episode list can otherwise
+  // fill every worker with episodes that all await the same cached request,
+  // reducing effective metadata concurrency from six series to one.
+  const seriesGroups = new Map<string, typeof records>()
+  for (const record of records) {
+    const title = normalizeTitle(record.media.title)
+    const identity = mediaAliasKeys(record.media)[0]
+      || `series:title:${title}:${Number.isInteger(record.media.year) ? record.media.year : ''}`
+    const group = seriesGroups.get(identity)
+    if (group) group.push(record)
+    else seriesGroups.set(identity, [record])
+  }
+  const groups = [...seriesGroups.values()]
   const collapsed = selectedRecords.length - records.length
   logTo(
     log,
     `Checking ${records.length} unique selected records against ${connection.service} metadata`
+    + ` across ${groups.length} series`
     + `${collapsed ? ` (${collapsed} duplicate or non-episode records skipped)` : ''}...`
   )
-  const issues = await mapLimit(records, 6, async record => {
-    if (record.media.kind !== 'series') return null
-    const sourceEpisodes = sourceConnection
-      ? await targetEpisodesFor(sourceConnection, record.media)
-      : []
+
+  const mappingForRecord = (
+    record: typeof records[number],
+    sourceEpisodes: readonly EpisodeRef[],
+    targets: readonly EpisodeRef[]
+  ): DestinationMappingIssue | null => {
     const parsedVideo = parseStremioVideoId(record.media.videoId)
     const parsedAnimeVideo = parseSimklAnimeVideoId(record.media.videoId)
     const requested: EpisodeRef = {
@@ -5908,11 +5927,10 @@ export async function inspectDestinationMappings(
       title: record.media.episodeTitle,
       videoId: record.media.videoId
     }
-    let targets = await targetEpisodesFor(connection, record.media, sourceEpisodes)
     const mappingOptions = connection.service === 'nuvio'
       ? { allowUnanchoredSameIndex: true }
       : undefined
-    let mapping = targets.length
+    let mapping: MappingOutcome | null = targets.length
       ? remapEpisode(
           requested,
           sourceEpisodes.length ? sourceEpisodes : [requested],
@@ -5920,23 +5938,6 @@ export async function inspectDestinationMappings(
           mappingOptions
         )
       : null
-    if (connection.service === 'nuvio' && mapping?.status !== 'mapped') {
-      const fallbackTargets = await tryNuvioKitsuFallback(
-        connection,
-        bundle,
-        record.media,
-        sourceEpisodes
-      )
-      if (fallbackTargets.length) {
-        targets = fallbackTargets
-        mapping = remapEpisode(
-          requested,
-          sourceEpisodes.length ? sourceEpisodes : [requested],
-          fallbackTargets,
-          mappingOptions
-        )
-      }
-    }
     // Simkl's official resolver can still match the write directly by IDs or
     // title/year. Its cached catalog is an enrichment path, not a reason to
     // reject a record when no deterministic episode projection is available.
@@ -5988,8 +5989,71 @@ export async function inspectDestinationMappings(
       sourceMedia: record.media,
       mapping: mapping!
     }
-  })
-  return issues.filter((issue): issue is DestinationMappingIssue => Boolean(issue))
+  }
+
+  let completedGroups = 0
+  let completedRecords = 0
+  const logProgress = () => logTo(
+    log,
+    `${connection.service} metadata mapping progress: ${completedGroups}/${groups.length} series`
+    + `; ${completedRecords}/${records.length} records checked.`
+  )
+  const heartbeat = setInterval(logProgress, DESTINATION_MAPPING_HEARTBEAT_MS)
+  try {
+    const issuesBySeries = await mapLimit(
+      groups,
+      DESTINATION_MAPPING_CONCURRENCY,
+      async group => {
+        const representative = group[0]
+        try {
+          const sourceEpisodes = sourceConnection
+            ? await targetEpisodesFor(sourceConnection, representative.media)
+            : []
+          let targets = await targetEpisodesFor(
+            connection,
+            representative.media,
+            sourceEpisodes
+          )
+          let groupIssues = group.map(record => (
+            mappingForRecord(record, sourceEpisodes, targets)
+          ))
+          if (
+            connection.service === 'nuvio'
+            && groupIssues.some(issue => issue?.mapping.status !== 'mapped')
+          ) {
+            const fallbackTargets = await tryNuvioKitsuFallback(
+              connection,
+              bundle,
+              representative.media,
+              sourceEpisodes
+            )
+            if (fallbackTargets.length) {
+              targets = fallbackTargets
+              groupIssues = group.map(record => (
+                mappingForRecord(record, sourceEpisodes, targets)
+              ))
+            }
+          }
+          return groupIssues
+        } finally {
+          completedGroups++
+          completedRecords += group.length
+          if (
+            completedGroups === 1
+            || completedGroups === groups.length
+            || completedGroups % DESTINATION_MAPPING_PROGRESS_INTERVAL === 0
+          ) {
+            logProgress()
+          }
+        }
+      }
+    )
+    return issuesBySeries
+      .flat()
+      .filter((issue): issue is DestinationMappingIssue => Boolean(issue))
+  } finally {
+    clearInterval(heartbeat)
+  }
 }
 
 export async function createMediaBridgeVerificationCheckpoint(

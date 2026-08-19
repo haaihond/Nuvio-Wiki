@@ -2067,6 +2067,109 @@ test('collapses duplicate history events before expensive Nuvio episode mapping'
   )))
 })
 
+test('schedules Nuvio episode metadata by series instead of binge-ordered records', async t => {
+  const connection = nuvioConnection()
+  connection.accountId = 'series-scheduler-user'
+  connection.profileId = 34
+  const startedSeries = new Set<string>()
+  const logs: string[] = []
+  let releaseFirstWave!: () => void
+  const firstWaveBarrier = new Promise<void>(resolve => {
+    releaseFirstWave = resolve
+  })
+  let markFirstWaveReady!: () => void
+  const firstWaveReady = new Promise<void>(resolve => {
+    markFirstWaveReady = resolve
+  })
+
+  t.mock.method(globalThis, 'fetch', async input => {
+    const url = new URL(String(input), 'https://nuvio.wiki')
+    if (url.pathname === '/rest/v1/addons') {
+      return Response.json([{
+        url: 'https://series-scheduler.test/manifest.json',
+        enabled: true,
+        sort_order: 1,
+        profile_id: 34
+      }])
+    }
+    if (url.hostname === 'series-scheduler.test' && url.pathname === '/manifest.json') {
+      return Response.json({ resources: ['meta'], types: ['series'], idPrefixes: ['tt'] })
+    }
+    if (url.hostname === 'series-scheduler.test' && url.pathname.startsWith('/meta/series/')) {
+      const contentId = decodeURIComponent(url.pathname.split('/').at(-1)!.replace(/\.json$/, ''))
+      startedSeries.add(contentId)
+      if (startedSeries.size === 6) markFirstWaveReady()
+      await firstWaveBarrier
+      return Response.json({
+        meta: {
+          id: contentId,
+          videos: Array.from({ length: 10 }, (_, index) => ({
+            id: `${contentId}:1:${index + 1}`,
+            season: 1,
+            episode: index + 1,
+            title: `Episode ${index + 1}`
+          }))
+        }
+      })
+    }
+    throw new Error(`Unexpected request: ${url}`)
+  })
+
+  const source = createEmptyBundle()
+  for (let seriesIndex = 0; seriesIndex < 7; seriesIndex++) {
+    const contentId = `tt900000${seriesIndex}`
+    for (let episodeIndex = 0; episodeIndex < 10; episodeIndex++) {
+      source.history.push({
+        media: {
+          kind: 'series',
+          ids: { imdb: contentId },
+          title: `Scheduler Show ${seriesIndex + 1}`,
+          season: 1,
+          episode: episodeIndex + 1,
+          episodeTitle: `Episode ${episodeIndex + 1}`
+        },
+        watchedAt: Date.UTC(2026, 7, 1, seriesIndex, episodeIndex),
+        playCount: 1
+      })
+    }
+  }
+
+  const pendingMappings = inspectDestinationMappings(
+    connection,
+    source,
+    { history: true, progress: false, library: false },
+    message => logs.push(message)
+  )
+  let firstWaveTimeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      firstWaveReady,
+      new Promise<void>((_resolve, reject) => {
+        firstWaveTimeout = setTimeout(
+          () => reject(new Error('Six distinct series were not scheduled concurrently.')),
+          1_000
+        )
+      })
+    ])
+  } finally {
+    if (firstWaveTimeout) clearTimeout(firstWaveTimeout)
+  }
+
+  assert.equal(startedSeries.size, 6)
+  releaseFirstWave()
+  const mappings = await pendingMappings
+
+  assert.equal(startedSeries.size, 7)
+  assert.equal(mappings.length, 70)
+  assert.ok(mappings.every(item => item.mapping.status === 'mapped'))
+  assert.ok(logs.some(message => (
+    message.includes('Checking 70 unique selected records against nuvio metadata across 7 series')
+  )))
+  assert.ok(logs.some(message => (
+    message.includes('nuvio metadata mapping progress: 7/7 series; 70/70 records checked')
+  )))
+})
+
 test('does not delete alternate Nuvio IDs at remapped episode coordinates', async t => {
   const requestedRpcs: string[] = []
   let watchedItems: any[] = []
