@@ -380,18 +380,57 @@ function normalizeAddonUrl(url) {
     .toLowerCase();
 }
 
-function mergeAddons(existing, requested) {
-  const requestedUrls = new Set(
-    requested.map((addon) => normalizeAddonUrl(addon.url))
+export function isMetadataAddon(addon) {
+  const name = String(addon?.name ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+  let hostname = '';
+  try {
+    hostname = new URL(String(addon?.url ?? '').trim()).hostname.toLowerCase();
+  } catch {
+    // A malformed URL cannot identify a metadata addon by host, but its name may.
+  }
+
+  return (
+    hostname === 'catalog.nuvio.tv' ||
+    name.includes('nuviocatalog') ||
+    hostname.includes('cinemeta') ||
+    name.includes('cinemeta') ||
+    hostname.includes('aiometadata') ||
+    hostname.split('.')[0] === 'aiomd' ||
+    name.includes('aiometadata')
   );
+}
+
+function addonForPush(addon, fallbackName = 'Addon') {
+  return {
+    url: addon.url,
+    name: addon.name || fallbackName,
+    enabled: addon.enabled !== false,
+  };
+}
+
+export function mergeAddons(existing, streamAddon, catalogAddon = null) {
+  const metadataIndex = existing.findIndex(isMetadataAddon);
+  const metadataAddon = metadataIndex >= 0
+    ? addonForPush(existing[metadataIndex])
+    : catalogAddon;
+  const excludedUrls = new Set([
+    normalizeAddonUrl(streamAddon.url),
+    ...(metadataAddon ? [normalizeAddonUrl(metadataAddon.url)] : []),
+  ].filter(Boolean));
   const preserved = existing
-    .filter((addon) => !requestedUrls.has(normalizeAddonUrl(addon.url)))
-    .map((addon) => ({
-      url: addon.url,
-      name: addon.name || 'Addon',
-      enabled: addon.enabled !== false,
-    }));
-  return [...requested, ...preserved];
+    .filter((addon, index) => (
+      index !== metadataIndex &&
+      !excludedUrls.has(normalizeAddonUrl(addon.url))
+    ))
+    .map((addon) => addonForPush(addon));
+
+  return [
+    ...(metadataAddon ? [addonForPush(metadataAddon)] : []),
+    addonForPush(streamAddon, 'Streaming addon'),
+    ...preserved,
+  ];
 }
 
 export async function installNuvioAddons(
@@ -406,35 +445,38 @@ export async function installNuvioAddons(
     return id === 1 || profile.uses_primary_addons !== true;
   });
   const snapshots = [];
-  const requested = [
-    ...(catalogAddon ? [catalogAddon] : []),
-    {
-      url: streamAddonManifest,
-      name: streamAddonName || 'Streaming addon',
-      enabled: true,
-    },
-  ];
+  const expectedLayouts = new Map();
+  const streamAddon = {
+    url: streamAddonManifest,
+    name: streamAddonName || 'Streaming addon',
+    enabled: true,
+  };
+  const streamUrl = normalizeAddonUrl(streamAddon.url);
 
   try {
     for (const profile of targets) {
       const id = profileIndex(profile);
       const current = await getNuvioAddons(token, id);
       snapshots.push({ id, addons: current });
-      await setNuvioAddons(token, id, mergeAddons(current, requested));
+      const ordered = mergeAddons(current, streamAddon, catalogAddon);
+      const firstUrl = normalizeAddonUrl(ordered[0]?.url);
+      expectedLayouts.set(id, {
+        metadataUrl: firstUrl !== streamUrl ? firstUrl : null,
+        streamIndex: firstUrl !== streamUrl ? 1 : 0,
+      });
+      await setNuvioAddons(token, id, ordered);
     }
 
     for (const profile of targets) {
-      const installed = await getNuvioAddons(token, profileIndex(profile));
-      const installedUrls = new Set(
-        installed.map((addon) => normalizeAddonUrl(addon.url))
-      );
-      const missing = requested.filter(
-        (addon) => !installedUrls.has(normalizeAddonUrl(addon.url))
-      );
-      if (missing.length) {
-        throw new Error(
-          `Nuvio did not retain ${missing.map((addon) => addon.name).join(' and ')}.`
-        );
+      const id = profileIndex(profile);
+      const installed = await getNuvioAddons(token, id);
+      const installedUrls = installed.map((addon) => normalizeAddonUrl(addon.url));
+      const expected = expectedLayouts.get(id);
+      if (installedUrls[expected.streamIndex] !== streamUrl) {
+        throw new Error('Nuvio did not retain the streaming addon in the expected position.');
+      }
+      if (expected.metadataUrl && installedUrls[0] !== expected.metadataUrl) {
+        throw new Error('Nuvio did not retain the metadata addon in the first position.');
       }
     }
   } catch (error) {
