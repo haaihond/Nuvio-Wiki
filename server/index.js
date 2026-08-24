@@ -12,7 +12,12 @@ import {
   isFileSearchDataFresh,
   readFileSearchData
 } from './refresh-file-search.js';
-import { runSetup, SetupError } from './quickstart/services.js';
+import {
+  normalizePenguplayManifestUrl,
+  runHttpsSetup,
+  runSetup,
+  SetupError
+} from './quickstart/services.js';
 import { getStatusOverview } from './status.js';
 import { createTraktOAuthStateStore } from './trakt-oauth.js';
 import {
@@ -21,6 +26,11 @@ import {
   exchangeSimklAuthorizationCode,
   renderSimklOAuthCallback
 } from './simkl-oauth.js';
+import {
+  createPenguplayResultStore,
+  createPenguplayUser,
+  verifyTurnstileToken
+} from './penguplay.js';
 import {
   createAdminDataStore,
   DEFAULT_ADMIN_TRAFFIC_MAX_ENTRIES
@@ -136,6 +146,7 @@ const profileShares = createProfileShareStore({
 });
 const traktOAuthStates = createTraktOAuthStateStore({ allowedOrigins: ALLOWED_ORIGIN });
 const simklOAuthStates = createSimklOAuthStateStore({ allowedOrigins: ALLOWED_ORIGIN });
+const penguplayResults = createPenguplayResultStore();
 
 for (const [method, level] of Object.entries({
   log: 'info',
@@ -296,7 +307,7 @@ function getOAuthRedirectUri(req, provider) {
   const isLocalhost = host.includes('localhost') || host.includes('127.0.0.1');
   const protocol = isLocalhost ? req.protocol : 'https';
   const uri = `${protocol}://${host}/api/${provider}/callback`;
-  const providerLabel = provider === 'simkl' ? 'Simkl' : 'Trakt';
+  const providerLabel = ({ simkl: 'Simkl', penguplay: 'PenguPlay', trakt: 'Trakt' })[provider] || provider;
   console.log(`[${providerLabel} API] Generated redirect URI: ${uri}`);
   return uri;
 }
@@ -620,6 +631,18 @@ app.use('/api/setup-profiles', (_req, res, next) => {
   next();
 });
 
+app.use('/api/penguplay', (_req, res, next) => {
+  res.set({
+    'Cache-Control': 'no-store, max-age=0',
+    Pragma: 'no-cache',
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'X-Robots-Tag': 'noindex, nofollow',
+    'Referrer-Policy': 'no-referrer'
+  });
+  next();
+});
+
 app.use('/api/admin', (_req, res, next) => {
   res.set({
     'Cache-Control': 'no-store, max-age=0',
@@ -658,6 +681,15 @@ const setupLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many setup attempts. Please wait a few minutes.' },
+  keyGenerator: (req) => req.ip
+});
+
+const penguplayCreateLimiter = rateLimit({
+  windowMs: 10 * 60_000,
+  max: 8,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many PenguPlay setup attempts. Please wait a few minutes.' },
   keyGenerator: (req) => req.ip
 });
 
@@ -871,6 +903,65 @@ app.get('/api/ai/health', (_req, res) => {
   });
 });
 
+app.get('/api/penguplay/turnstile-config', (_req, res) => {
+  const siteKey = process.env.TURNSTILE_SITE_KEY;
+  if (!siteKey) {
+    return res.status(503).json({ error: 'Human verification is not configured on this server yet.' });
+  }
+  res.set('Cache-Control', 'no-store');
+  return res.json({ siteKey });
+});
+
+app.post('/api/penguplay/create', penguplayCreateLimiter, async (req, res) => {
+  const siteKey = process.env.TURNSTILE_SITE_KEY;
+  const secretKey = process.env.TURNSTILE_SECRET_KEY;
+  const creationKey = process.env.PENGUPLAY_CREATION_KEY;
+  if (!siteKey || !secretKey || !creationKey) {
+    return res.status(503).json({ error: 'PenguPlay setup is not configured on this server yet.' });
+  }
+
+  const token = typeof req.body?.turnstileToken === 'string'
+    ? req.body.turnstileToken.trim()
+    : '';
+  if (!token || token.length > 2_048) {
+    return res.status(400).json({ error: 'Complete the human check, then try again.' });
+  }
+
+  let expectedHostname = '';
+  try {
+    expectedHostname = new URL(ALLOWED_ORIGIN).hostname;
+  } catch {
+    // Turnstile still validates its configured hostname when ALLOWED_ORIGIN is invalid.
+  }
+
+  try {
+    await verifyTurnstileToken({
+      secretKey,
+      token,
+      remoteIp: req.ip,
+      expectedAction: 'penguplay-create',
+      expectedHostnames: expectedHostname ? [expectedHostname] : []
+    });
+  } catch (error) {
+    console.warn('[PenguPlay] Human verification failed:', error.message || error);
+    return res.status(400).json({ error: 'The human check did not pass. Please try it again.' });
+  }
+
+  try {
+    const penguplayUser = await createPenguplayUser({
+      creationKey,
+      createdAt: new Date().toISOString()
+    });
+    const normalizedManifest = normalizePenguplayManifestUrl(penguplayUser.addonUrl);
+    const receipt = penguplayResults.issue(normalizedManifest);
+    res.set('Cache-Control', 'no-store');
+    return res.json({ receipt });
+  } catch (error) {
+    console.error('[PenguPlay] User creation failed:', error.message || error);
+    return res.status(502).json({ error: 'PenguPlay could not create the add-on. Please try again.' });
+  }
+});
+
 app.post('/api/ai/setup', setupLimiter, async (req, res) => {
   res.writeHead(200, {
     'Content-Type': 'application/x-ndjson; charset=utf-8',
@@ -879,16 +970,34 @@ app.post('/api/ai/setup', setupLimiter, async (req, res) => {
   });
 
   try {
-    const input = req.body;
+    let input = req.body;
+    let penguplayReceipt = '';
+    if (input?.setupPath === 'https') {
+      penguplayReceipt = typeof input.penguplayReceipt === 'string'
+        ? input.penguplayReceipt
+        : '';
+      const authResult = penguplayResults.read(penguplayReceipt);
+      if (!authResult) {
+        throw new SetupError(
+          'Your PenguPlay verification has expired. Complete the human check again.',
+          'penguplay',
+          400
+        );
+      }
+      input = { ...input, penguplayManifest: authResult.manifestUrl };
+    }
     res.write(`${JSON.stringify({
       type: 'progress',
       step: 'details',
       message: 'Details validated'
     })}\n`);
 
-    const result = await runSetup(input, (step, message) => {
+    const setupRunner = input?.setupPath === 'https' ? runHttpsSetup : runSetup;
+    const result = await setupRunner(input, (step, message) => {
       res.write(`${JSON.stringify({ type: 'progress', step, message })}\n`);
     });
+
+    if (penguplayReceipt) penguplayResults.consume(penguplayReceipt);
 
     res.write(`${JSON.stringify({ type: 'result', data: result })}\n`);
   } catch (error) {

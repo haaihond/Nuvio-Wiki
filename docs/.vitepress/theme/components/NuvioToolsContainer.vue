@@ -22,9 +22,9 @@ const tabs: ToolTab[] = [
   {
     id: 'quickstart',
     label: 'Quickstart Tool',
-    description: 'Configure AIOStreams & TorBox in minutes.',
-    title: 'Nuvio Quickstart Tool (TorBox & AIOStreams)',
-    details: 'This tool automates setting up Nuvio addons for you. It installs <strong>AIOStreams</strong> using Tam-Taro\'s configuration template and links your <strong>TorBox</strong> account.',
+    description: 'Set up TorBox and AIOStreams, or use PenguPlay for free.',
+    title: 'Nuvio Quickstart Tool',
+    details: 'Pick <strong>TorBox + AIOStreams</strong> or <strong>PenguPlay</strong>, then follow the steps to add it to Nuvio.',
     component: markRaw(defineAsyncComponent(() => import('./NuvioQuickstart.vue'))),
     props: { defaultExpanded: true, hideTip: true, hideHeader: true },
     icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="tab-icon-svg"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>`

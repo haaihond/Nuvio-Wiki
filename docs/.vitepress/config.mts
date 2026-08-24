@@ -330,6 +330,10 @@ export default defineConfig({
           target: 'http://localhost:3001',
           changeOrigin: true
         },
+        '/api/penguplay': {
+          target: 'http://localhost:3001',
+          changeOrigin: true
+        },
         '/api/status': {
           target: 'http://localhost:3001',
           changeOrigin: true

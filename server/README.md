@@ -79,6 +79,53 @@ Restarting the server invalidates pending popup authorizations. Simkl access
 tokens are long-lived and Simkl does not issue a refresh token; reconnect after
 revocation or a `401` response.
 
+## PenguPlay quickstart verification
+
+The free quickstart uses Cloudflare Turnstile inside Nuvio. It does not require
+an account, open the PenguPlay configurator, or ask the user to copy a manifest
+URL.
+
+Create a Turnstile widget in Cloudflare, add `nuvio.wiki` to its allowed
+hostnames, and configure the Nuvio server:
+
+```env
+TURNSTILE_SITE_KEY=your-turnstile-site-key
+TURNSTILE_SECRET_KEY=your-turnstile-secret-key
+PENGUPLAY_CREATION_KEY=your-penguplay-creation-key
+```
+
+The browser receives a one-time Turnstile token. The Nuvio server validates it
+with Cloudflare's Siteverify endpoint before calling PenguPlay's existing
+create-user endpoint:
+
+```http
+POST https://pengu.uk/api/create_user
+Content-Type: application/json
+
+{
+  "creation_key": "<server-only creation key>",
+  "data": {
+    "createdAt": "<current ISO timestamp>",
+    "createdFrom": "nuvio.wiki"
+  }
+}
+```
+
+Successful response:
+
+```json
+{
+  "status": 200,
+  "accessToken": "<personal PenguPlay token>",
+  "addonUrl": "https://pengu.uk/<personal-credential>/manifest.json"
+}
+```
+
+Turnstile tokens are checked server-side for the `penguplay-create` action and
+the hostname from `ALLOWED_ORIGIN`. The creation key, returned access token, and
+addon URL stay on the server. The browser receives only a short-lived, one-time
+receipt that is exchanged when the user starts the installation.
+
 ## Roll back to explicit context caching
 
 The previous cache implementation remains intact. Set this environment variable
@@ -133,6 +180,6 @@ proxy location described below.
 
 ## Production Deployment (Nginx Reverse Proxy)
 
-When running the wiki website and AI server in production behind Nginx, you must route requests starting with `/api/ai`, `/api/trakt`, `/api/simkl`, `/api/setup-profiles`, and `/api/admin`, plus `/api/status`, `/api/setup-doctor/feedback`, and `/api/page-feedback`, to the Express backend (default port `3001`). Clean `/setup/CODE` URLs must also redirect to the built `/setup/` receiver with the code preserved in its query string.
+When running the wiki website and AI server in production behind Nginx, you must route requests starting with `/api/ai`, `/api/trakt`, `/api/simkl`, `/api/penguplay`, `/api/setup-profiles`, and `/api/admin`, plus `/api/status`, `/api/setup-doctor/feedback`, and `/api/page-feedback`, to the Express backend (default port `3001`). Clean `/setup/CODE` URLs must also redirect to the built `/setup/` receiver with the code preserved in its query string.
 
 An example Nginx location block configuration is provided in [wiki-api.location.conf](../deploy/nginx/wiki-api.location.conf). Include these configuration blocks inside your site's HTTPS server block to enable the AI assistant, Sync Bridge OAuth, live status page, and anonymous feedback.

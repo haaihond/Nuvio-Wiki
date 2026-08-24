@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  normalizePenguplayManifestUrl,
   resolveCatalogAddon,
   serviceConstants,
   SetupError,
@@ -51,4 +52,29 @@ test('rejects unsafe or unknown catalog options', () => {
     () => resolveCatalogAddon({ catalogMode: 'other' }),
     /valid catalog option/
   );
+});
+
+test('accepts only personal HTTPS manifests hosted by PenguPlay', () => {
+  const manifest =
+    'https://pengu.uk/zabc_DEF-123/manifest.json';
+
+  assert.equal(normalizePenguplayManifestUrl(manifest), manifest);
+  assert.equal(serviceConstants.penguplayBase, 'https://pengu.uk');
+});
+
+test('rejects lookalike, incomplete, and modified PenguPlay URLs', () => {
+  for (const value of [
+    'https://pengu.uk.example.com/zabc/manifest.json',
+    'http://pengu.uk/zabc/manifest.json',
+    'https://pengu.uk/configure',
+    'https://pengu.uk/zabc/manifest.json?token=unexpected',
+  ]) {
+    assert.throws(
+      () => normalizePenguplayManifestUrl(value),
+      (error) =>
+        error instanceof SetupError &&
+        error.step === 'penguplay' &&
+        error.status === 400
+    );
+  }
 });

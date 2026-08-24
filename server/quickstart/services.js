@@ -6,6 +6,7 @@ const NUVIO_BASE = 'https://api.nuvio.tv';
 const NUVIO_KEY = 'sb_publishable_1Clq8rlTVACkdcZuqr6_AD__xUUC_EN';
 const AIOSTREAMS_BASE =
   'https://aiostreamsfortheweebs.midnightignite.me';
+const PENGUPLAY_BASE = 'https://pengu.uk';
 const NUVIO_CATALOG_BASE = 'https://catalog.nuvio.tv/';
 const CINEMETA_MANIFEST = 'https://v3-cinemeta.strem.io/manifest.json';
 
@@ -159,6 +160,38 @@ export function resolveCatalogAddon(input = {}) {
   }
 
   throw new SetupError('Choose a valid catalog option.', 'details', 400);
+}
+
+export function normalizePenguplayManifestUrl(value) {
+  let url;
+  try {
+    url = new URL(String(value ?? '').trim());
+  } catch {
+    throw new SetupError(
+      'Paste the HTTPS addon URL copied from PenguPlay.',
+      'penguplay',
+      400
+    );
+  }
+
+  if (
+    url.protocol !== 'https:' ||
+    url.hostname.toLowerCase() !== 'pengu.uk' ||
+    (url.port && url.port !== '443') ||
+    url.username ||
+    url.password ||
+    url.search ||
+    !/\/manifest\.json$/i.test(url.pathname)
+  ) {
+    throw new SetupError(
+      'Use the complete HTTPS manifest URL copied from pengu.uk.',
+      'penguplay',
+      400
+    );
+  }
+
+  url.hash = '';
+  return url.toString();
 }
 
 export function formatTorBoxError(message, status) {
@@ -364,8 +397,8 @@ function mergeAddons(existing, requested) {
 export async function installNuvioAddons(
   token,
   profiles,
-  aiostreamsManifest,
-  aiostreamsName,
+  streamAddonManifest,
+  streamAddonName,
   catalogAddon = resolveCatalogAddon()
 ) {
   const targets = profiles.filter((profile) => {
@@ -376,8 +409,8 @@ export async function installNuvioAddons(
   const requested = [
     ...(catalogAddon ? [catalogAddon] : []),
     {
-      url: aiostreamsManifest,
-      name: aiostreamsName || 'AIOStreams',
+      url: streamAddonManifest,
+      name: streamAddonName || 'Streaming addon',
       enabled: true,
     },
   ];
@@ -540,6 +573,88 @@ export async function logoutNuvio(token) {
   }
 }
 
+export async function verifyPenguplayManifest(value) {
+  const manifestUrl = normalizePenguplayManifestUrl(value);
+  let manifest;
+
+  try {
+    manifest = await requestJson(manifestUrl, {}, 45000);
+  } catch (error) {
+    throw new SetupError(
+      `PenguPlay could not verify this addon URL: ${error.message}`,
+      'penguplay',
+      error.status === 401 || error.status === 403 ? 400 : 502
+    );
+  }
+
+  if (!manifest?.id || !manifest?.name || !Array.isArray(manifest?.resources)) {
+    throw new SetupError(
+      'PenguPlay returned an incomplete addon manifest. Copy a fresh addon URL and try again.',
+      'penguplay',
+      502
+    );
+  }
+
+  return {
+    manifestUrl,
+    manifestName: manifest.name || 'PenguPlay',
+  };
+}
+
+export async function runHttpsSetup(input, progress = () => {}) {
+  const email = String(input.email ?? '').trim().toLowerCase();
+  const nuvioPassword = String(input.nuvioPassword ?? '');
+  const catalogAddon = resolveCatalogAddon(input);
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new SetupError('Enter a valid email address.', 'details', 400);
+  }
+  if (nuvioPassword.length < 6) {
+    throw new SetupError(
+      'The Nuvio password must be at least 6 characters.',
+      'details',
+      400
+    );
+  }
+
+  progress('penguplay', 'Checking your personal PenguPlay addon URL');
+  const penguplay = await verifyPenguplayManifest(input.penguplayManifest);
+
+  progress('nuvio', 'Creating or signing in to Nuvio');
+  const nuvio = await createOrLoginNuvio(email, nuvioPassword);
+  const profiles = await ensureNuvioProfiles(nuvio.token);
+
+  try {
+    const addons = [
+      penguplay.manifestName,
+      ...(catalogAddon ? [catalogAddon.name] : []),
+    ];
+    progress('addons', `Installing ${addons.join(' and ')} in Nuvio`);
+    const installedProfiles = await installNuvioAddons(
+      nuvio.token,
+      profiles,
+      penguplay.manifestUrl,
+      penguplay.manifestName,
+      catalogAddon
+    );
+
+    progress('complete', 'Setup complete');
+    return {
+      setupPath: 'https',
+      email,
+      nuvioAccountCreated: nuvio.created,
+      ...(nuvio.created ? { nuvioPassword } : {}),
+      installedProfiles,
+      addonManifest: penguplay.manifestUrl,
+      addonConfigureUrl: `${PENGUPLAY_BASE}/configure`,
+      addonName: penguplay.manifestName,
+      addons,
+    };
+  } finally {
+    await logoutNuvio(nuvio.token);
+  }
+}
+
 export async function runSetup(input, progress = () => {}) {
   const email = String(input.email ?? '').trim().toLowerCase();
   const nuvioPassword = String(input.nuvioPassword ?? '');
@@ -603,6 +718,7 @@ export async function runSetup(input, progress = () => {}) {
 
     progress('complete', 'Setup complete');
     return {
+      setupPath: 'debrid',
       email,
       nuvioAccountCreated: nuvio.created,
       ...(nuvio.created ? { nuvioPassword } : {}),
@@ -631,6 +747,7 @@ export async function runSetup(input, progress = () => {}) {
 
 export const serviceConstants = {
   aiostreamsBase: AIOSTREAMS_BASE,
+  penguplayBase: PENGUPLAY_BASE,
   nuvioCatalogBase: NUVIO_CATALOG_BASE,
   nuvioCatalogManifest: normalizeManifestUrl(NUVIO_CATALOG_BASE),
   cinemetaManifest: CINEMETA_MANIFEST,
