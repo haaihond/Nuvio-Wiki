@@ -349,6 +349,88 @@ function profileIndex(profile) {
   return Number(profile.profile_index ?? profile.id);
 }
 
+function defaultProfileOption() {
+  return {
+    profileIndex: 1,
+    name: 'Main',
+    usesPrimaryAddons: false,
+  };
+}
+
+function toProfileOption(profile) {
+  const id = profileIndex(profile);
+  return {
+    profileIndex: id,
+    name: String(profile.name || `Profile ${id}`),
+    usesPrimaryAddons: id !== 1 && profile.uses_primary_addons === true,
+  };
+}
+
+export async function loadNuvioProfileOptions(emailValue, passwordValue) {
+  const email = String(emailValue ?? '').trim().toLowerCase();
+  const password = String(passwordValue ?? '');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || password.length < 6) {
+    throw new SetupError('Enter valid Nuvio account details.', 'details', 400);
+  }
+
+  let token;
+  try {
+    const login = await nuvioAuth('/token?grant_type=password', { email, password });
+    token = login?.access_token;
+    if (!token) throw new Error('No access token was returned.');
+  } catch (error) {
+    if ([400, 401, 403].includes(error.status)) {
+      return { existingAccount: false, profiles: [defaultProfileOption()] };
+    }
+    throw new SetupError(
+      `Nuvio profiles could not be loaded: ${error.message}`,
+      'profiles',
+      502
+    );
+  }
+
+  try {
+    const profiles = await getNuvioProfiles(token);
+    const options = profiles
+      .map(toProfileOption)
+      .filter((profile) => Number.isInteger(profile.profileIndex) && profile.profileIndex > 0);
+    return {
+      existingAccount: true,
+      profiles: options.length ? options : [defaultProfileOption()],
+    };
+  } finally {
+    await logoutNuvio(token);
+  }
+}
+
+export function selectAddonProfiles(profiles, selectedProfileIds) {
+  const directTargets = profiles.filter((profile) => {
+    const id = profileIndex(profile);
+    return id === 1 || profile.uses_primary_addons !== true;
+  });
+  if (selectedProfileIds === undefined) return directTargets;
+  if (!Array.isArray(selectedProfileIds) || selectedProfileIds.length === 0) {
+    throw new SetupError('Choose at least one Nuvio profile.', 'profiles', 400);
+  }
+
+  const profilesById = new Map(profiles.map((profile) => [profileIndex(profile), profile]));
+  const targets = [];
+  const seen = new Set();
+  for (const value of selectedProfileIds) {
+    const id = Number(value);
+    if (!Number.isInteger(id) || !profilesById.has(id)) {
+      throw new SetupError('Choose valid Nuvio profiles.', 'profiles', 400);
+    }
+    const selected = profilesById.get(id);
+    const effectiveId = id !== 1 && selected.uses_primary_addons === true ? 1 : id;
+    const effective = profilesById.get(effectiveId);
+    if (!effective || seen.has(effectiveId)) continue;
+    seen.add(effectiveId);
+    targets.push(effective);
+  }
+  return targets;
+}
+
 export async function getNuvioAddons(token, profileId) {
   const addons = await nuvioRest(
     `/addons?select=*&profile_id=eq.${profileId}&order=sort_order`,
@@ -364,7 +446,7 @@ export async function setNuvioAddons(token, profileId, addons) {
       p_profile_id: profileId,
       p_addons: addons.map((addon, index) => ({
         url: addon.url,
-        name: addon.name,
+        ...(addon.name ? { name: addon.name } : {}),
         enabled: addon.enabled !== false,
         sort_order: index,
       })),
@@ -385,11 +467,20 @@ export function isMetadataAddon(addon) {
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '');
   let hostname = '';
+  let pathParts = [];
   try {
-    hostname = new URL(String(addon?.url ?? '').trim()).hostname.toLowerCase();
+    const url = new URL(String(addon?.url ?? '').trim());
+    hostname = url.hostname.toLowerCase();
+    pathParts = url.pathname.toLowerCase().split('/').filter(Boolean);
   } catch {
     // A malformed URL cannot identify a metadata addon by host, but its name may.
   }
+
+  const hasAiometadataPath = (
+    pathParts.length === 3 &&
+    pathParts[0] === 'stremio' &&
+    pathParts[2] === 'manifest.json'
+  );
 
   return (
     hostname === 'catalog.nuvio.tv' ||
@@ -398,11 +489,25 @@ export function isMetadataAddon(addon) {
     name.includes('cinemeta') ||
     hostname.includes('aiometadata') ||
     hostname.split('.')[0] === 'aiomd' ||
-    name.includes('aiometadata')
+    name.includes('aiometadata') ||
+    hasAiometadataPath
   );
 }
 
-function addonForPush(addon, fallbackName = 'Addon') {
+export function isPenguplayAddon(addon) {
+  const name = String(addon?.name ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+  let hostname = '';
+  try {
+    hostname = new URL(String(addon?.url ?? '').trim()).hostname.toLowerCase();
+  } catch {
+    // A malformed URL cannot identify PenguPlay by host, but its name may.
+  }
+  return hostname === 'pengu.uk' || name.includes('penguplay');
+}
+
+function addonForPush(addon, fallbackName = null) {
   return {
     url: addon.url,
     name: addon.name || fallbackName,
@@ -415,20 +520,30 @@ export function mergeAddons(existing, streamAddon, catalogAddon = null) {
   const metadataAddon = metadataIndex >= 0
     ? addonForPush(existing[metadataIndex])
     : catalogAddon;
+  const requestedStreamUrl = normalizeAddonUrl(streamAddon.url);
+  const reuseInstalledStream = isPenguplayAddon(streamAddon);
+  const streamIndex = reuseInstalledStream
+    ? existing.findIndex(isPenguplayAddon)
+    : existing.findIndex((addon) => normalizeAddonUrl(addon.url) === requestedStreamUrl);
+  const selectedStreamAddon = reuseInstalledStream && streamIndex >= 0
+    ? addonForPush(existing[streamIndex])
+    : addonForPush(streamAddon, 'Streaming addon');
   const excludedUrls = new Set([
-    normalizeAddonUrl(streamAddon.url),
+    requestedStreamUrl,
+    normalizeAddonUrl(selectedStreamAddon.url),
     ...(metadataAddon ? [normalizeAddonUrl(metadataAddon.url)] : []),
   ].filter(Boolean));
   const preserved = existing
     .filter((addon, index) => (
       index !== metadataIndex &&
+      index !== streamIndex &&
       !excludedUrls.has(normalizeAddonUrl(addon.url))
     ))
     .map((addon) => addonForPush(addon));
 
   return [
     ...(metadataAddon ? [addonForPush(metadataAddon)] : []),
-    addonForPush(streamAddon, 'Streaming addon'),
+    addonForPush(selectedStreamAddon),
     ...preserved,
   ];
 }
@@ -438,12 +553,10 @@ export async function installNuvioAddons(
   profiles,
   streamAddonManifest,
   streamAddonName,
-  catalogAddon = resolveCatalogAddon()
+  catalogAddon = resolveCatalogAddon(),
+  selectedProfileIds
 ) {
-  const targets = profiles.filter((profile) => {
-    const id = profileIndex(profile);
-    return id === 1 || profile.uses_primary_addons !== true;
-  });
+  const targets = selectAddonProfiles(profiles, selectedProfileIds);
   const snapshots = [];
   const expectedLayouts = new Map();
   const streamAddon = {
@@ -451,7 +564,6 @@ export async function installNuvioAddons(
     name: streamAddonName || 'Streaming addon',
     enabled: true,
   };
-  const streamUrl = normalizeAddonUrl(streamAddon.url);
 
   try {
     for (const profile of targets) {
@@ -459,10 +571,14 @@ export async function installNuvioAddons(
       const current = await getNuvioAddons(token, id);
       snapshots.push({ id, addons: current });
       const ordered = mergeAddons(current, streamAddon, catalogAddon);
+      const orderedStreamIndex = isPenguplayAddon(streamAddon)
+        ? ordered.findIndex(isPenguplayAddon)
+        : ordered.findIndex((addon) => normalizeAddonUrl(addon.url) === normalizeAddonUrl(streamAddon.url));
       const firstUrl = normalizeAddonUrl(ordered[0]?.url);
       expectedLayouts.set(id, {
-        metadataUrl: firstUrl !== streamUrl ? firstUrl : null,
-        streamIndex: firstUrl !== streamUrl ? 1 : 0,
+        metadataUrl: orderedStreamIndex === 1 ? firstUrl : null,
+        streamIndex: orderedStreamIndex,
+        streamUrl: normalizeAddonUrl(ordered[orderedStreamIndex]?.url),
       });
       await setNuvioAddons(token, id, ordered);
     }
@@ -472,7 +588,7 @@ export async function installNuvioAddons(
       const installed = await getNuvioAddons(token, id);
       const installedUrls = installed.map((addon) => normalizeAddonUrl(addon.url));
       const expected = expectedLayouts.get(id);
-      if (installedUrls[expected.streamIndex] !== streamUrl) {
+      if (expected.streamIndex < 0 || installedUrls[expected.streamIndex] !== expected.streamUrl) {
         throw new Error('Nuvio did not retain the streaming addon in the expected position.');
       }
       if (expected.metadataUrl && installedUrls[0] !== expected.metadataUrl) {
@@ -677,7 +793,8 @@ export async function runHttpsSetup(input, progress = () => {}) {
       profiles,
       penguplay.manifestUrl,
       penguplay.manifestName,
-      catalogAddon
+      catalogAddon,
+      input.profileIds
     );
 
     progress('complete', 'Setup complete');
@@ -687,9 +804,6 @@ export async function runHttpsSetup(input, progress = () => {}) {
       nuvioAccountCreated: nuvio.created,
       ...(nuvio.created ? { nuvioPassword } : {}),
       installedProfiles,
-      addonManifest: penguplay.manifestUrl,
-      addonConfigureUrl: `${PENGUPLAY_BASE}/configure`,
-      addonName: penguplay.manifestName,
       addons,
     };
   } finally {
@@ -755,7 +869,8 @@ export async function runSetup(input, progress = () => {}) {
       profiles,
       aiostreams.manifestUrl,
       aiostreams.manifestName,
-      catalogAddon
+      catalogAddon,
+      input.profileIds
     );
 
     progress('complete', 'Setup complete');

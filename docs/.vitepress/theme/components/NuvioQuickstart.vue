@@ -39,6 +39,12 @@ const translations = {
     continue: 'Continue',
     accountPageTitle: 'Sign in to Nuvio',
     accountPageDesc: 'Use your existing account. If you are new, these details will create one.',
+    profilesPageTitle: 'Choose Nuvio profiles',
+    profilesPageDesc: 'Select every profile where this streaming setup should be installed.',
+    profilesFallback: 'No existing account was found with these details. A new account will use the Main profile. If you already have an account, go back and check your password.',
+    profileSharesPrimary: 'Uses the Main profile\'s addons',
+    profilesRequiredError: 'Choose at least one Nuvio profile.',
+    profilesLoading: 'Loading profiles…',
     torboxPageTitle: 'Connect TorBox',
     torboxPageDesc: 'Copy your API key from TorBox settings and paste it below.',
     modePageTitle: 'How do you want AIOStreams set up?',
@@ -52,6 +58,7 @@ const translations = {
     reviewTitle: 'Check everything once more',
     reviewDesc: 'If this looks right, start the installation.',
     reviewAccount: 'Nuvio account',
+    reviewProfiles: 'Install on',
     reviewStreaming: 'Streaming addon',
     reviewCatalog: 'Catalog',
     reviewMatching: 'Matching keys',
@@ -91,6 +98,7 @@ const translations = {
     catalogLabel: 'Catalog addon',
     catalogHelp: 'Nuvio Catalog is the default in both setup modes.',
     catalogNuvio: 'Nuvio Catalog (recommended)',
+    catalogAutomatic: 'Keep existing metadata, otherwise Nuvio Catalog',
     catalogCinemeta: 'Cinemeta',
     catalogNone: 'No catalog addon',
     catalogCustom: 'Custom manifest URL',
@@ -127,7 +135,6 @@ const translations = {
     addonCatalog: 'Nuvio Catalog',
     addonPenguplay: 'PenguPlay',
     aioManifestLabel: 'AIOStreams manifest',
-    penguResultManifestLabel: 'PenguPlay manifest',
     copy: 'Copy',
     copied: 'Copied',
     openAioSettings: 'Open AIOStreams settings',
@@ -170,6 +177,12 @@ const translations = {
     continue: 'Verder',
     accountPageTitle: 'Meld je aan bij Nuvio',
     accountPageDesc: 'Gebruik je bestaande account. Ben je nieuw, dan wordt met deze gegevens een account gemaakt.',
+    profilesPageTitle: 'Kies Nuvio-profielen',
+    profilesPageDesc: 'Selecteer elk profiel waarop deze streamingconfiguratie moet worden geïnstalleerd.',
+    profilesFallback: 'Er is geen bestaand account gevonden met deze gegevens. Een nieuw account gebruikt het hoofdprofiel. Heb je al een account, ga dan terug en controleer je wachtwoord.',
+    profileSharesPrimary: 'Gebruikt de addons van het hoofdprofiel',
+    profilesRequiredError: 'Kies minimaal één Nuvio-profiel.',
+    profilesLoading: 'Profielen laden…',
     torboxPageTitle: 'Koppel TorBox',
     torboxPageDesc: 'Kopieer je API-sleutel uit de TorBox-instellingen en plak hem hieronder.',
     modePageTitle: 'Hoe wil je AIOStreams instellen?',
@@ -183,6 +196,7 @@ const translations = {
     reviewTitle: 'Controleer alles nog één keer',
     reviewDesc: 'Klopt alles, start dan de installatie.',
     reviewAccount: 'Nuvio-account',
+    reviewProfiles: 'Installeren op',
     reviewStreaming: 'Streaming-addon',
     reviewCatalog: 'Catalogus',
     reviewMatching: 'Koppelsleutels',
@@ -222,6 +236,7 @@ const translations = {
     catalogLabel: 'Catalogus-addon',
     catalogHelp: 'Nuvio Catalog is de standaard in beide installatiemodi.',
     catalogNuvio: 'Nuvio Catalog (aanbevolen)',
+    catalogAutomatic: 'Bestaande metadata behouden, anders Nuvio Catalog',
     catalogCinemeta: 'Cinemeta',
     catalogNone: 'Geen catalogus-addon',
     catalogCustom: 'Aangepaste manifest-URL',
@@ -258,7 +273,6 @@ const translations = {
     addonCatalog: 'Nuvio Catalog',
     addonPenguplay: 'PenguPlay',
     aioManifestLabel: 'AIOStreams-manifest',
-    penguResultManifestLabel: 'PenguPlay-manifest',
     copy: 'Kopiëren',
     copied: 'Gekopieerd',
     openAioSettings: 'Open AIOStreams-instellingen',
@@ -287,6 +301,7 @@ type SetupMode = 'simple' | 'advanced'
 type CatalogMode = 'nuvio' | 'cinemeta' | 'none' | 'custom'
 type WizardPage =
   | 'account'
+  | 'profiles'
   | 'torbox'
   | 'mode'
   | 'catalog'
@@ -309,7 +324,8 @@ const form = reactive({
   tmdbApiKey: '',
   tvdbApiKey: '',
   catalogMode: 'nuvio' as CatalogMode,
-  customCatalogUrl: ''
+  customCatalogUrl: '',
+  profileIds: [] as number[]
 })
 
 const errors = reactive({
@@ -318,8 +334,20 @@ const errors = reactive({
   torboxApiKey: '',
   aiostreamsPassword: '',
   penguplayAuth: '',
-  customCatalogUrl: ''
+  customCatalogUrl: '',
+  profiles: ''
 })
+
+interface NuvioProfileOption {
+  profileIndex: number
+  name: string
+  usesPrimaryAddons: boolean
+}
+
+const profileOptions = ref<NuvioProfileOption[]>([])
+const profilesLoading = ref(false)
+const profileLookupFallback = ref(false)
+const profilesLoaded = ref(false)
 
 const showNuvioPassword = ref(false)
 const showTorboxApiKey = ref(false)
@@ -352,12 +380,12 @@ const progressSteps = computed(() => setupPath.value === 'https'
 
 const wizardPages = computed<WizardPage[]>(() => {
   if (setupPath.value === 'https') {
-    return ['account', 'penguplay', 'review']
+    return ['account', 'profiles', 'penguplay', 'review']
   }
 
   return setupMode.value === 'advanced'
-    ? ['account', 'torbox', 'mode', 'catalog', 'matching', 'review']
-    : ['account', 'torbox', 'mode', 'review']
+    ? ['account', 'profiles', 'torbox', 'mode', 'catalog', 'matching', 'review']
+    : ['account', 'profiles', 'torbox', 'mode', 'review']
 })
 
 const currentPage = computed<WizardPage>(() =>
@@ -374,6 +402,7 @@ const wizardProgress = computed(() =>
 
 const pageTitle = computed(() => ({
   account: t.value.accountPageTitle,
+  profiles: t.value.profilesPageTitle,
   torbox: t.value.torboxPageTitle,
   mode: t.value.modePageTitle,
   catalog: t.value.catalogPageTitle,
@@ -384,6 +413,7 @@ const pageTitle = computed(() => ({
 
 const pageDescription = computed(() => ({
   account: t.value.accountPageDesc,
+  profiles: t.value.profilesPageDesc,
   torbox: t.value.torboxPageDesc,
   mode: t.value.modePageDesc,
   catalog: t.value.catalogPageDesc,
@@ -407,6 +437,11 @@ const matchingSummary = computed(() => {
   return names.length ? names.join(' + ') : t.value.reviewNotAdded
 })
 
+const profileSummary = computed(() => profileOptions.value
+  .filter(profile => form.profileIds.includes(profile.profileIndex))
+  .map(profile => profile.name)
+  .join(' + '))
+
 interface SetupResult {
   setupPath: SetupPath
   email: string
@@ -416,8 +451,6 @@ interface SetupResult {
   installedProfiles: number
   aiostreamsManifest?: string
   aiostreamsConfigureUrl?: string
-  addonManifest?: string
-  addonConfigureUrl?: string
   addons: string[]
 }
 
@@ -427,9 +460,7 @@ const lastErrorField = ref<string | null>(null)
 const isSubmitting = ref(false)
 const copySuccess = ref(false)
 
-const resultManifest = computed(() => result.value?.setupPath === 'https'
-  ? result.value.addonManifest || ''
-  : result.value?.aiostreamsManifest || '')
+const resultManifest = computed(() => result.value?.aiostreamsManifest || '')
 
 const resultConfigureUrl = computed(() => result.value?.setupPath === 'https'
   ? ''
@@ -480,6 +511,58 @@ function changePath() {
 function setSetupMode(mode: SetupMode) {
   setupMode.value = mode
   errors.customCatalogUrl = ''
+}
+
+function resetProfileSelection() {
+  profileOptions.value = []
+  form.profileIds = []
+  profileLookupFallback.value = false
+  profilesLoaded.value = false
+  errors.profiles = ''
+}
+
+function handleAccountInput(field: 'email' | 'nuvioPassword') {
+  errors[field] = ''
+  resetProfileSelection()
+}
+
+async function loadProfileOptions(): Promise<boolean> {
+  if (profilesLoaded.value && profileOptions.value.length) return true
+
+  profilesLoading.value = true
+  errors.profiles = ''
+  try {
+    const response = await fetch(withBase('/api/ai/profiles'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: form.email, password: form.nuvioPassword })
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data?.error || 'Nuvio profiles could not be loaded.')
+
+    const profiles = Array.isArray(data?.profiles)
+      ? data.profiles.filter((profile: any) => (
+          Number.isInteger(Number(profile?.profileIndex)) &&
+          Number(profile.profileIndex) > 0
+        )).map((profile: any) => ({
+          profileIndex: Number(profile.profileIndex),
+          name: String(profile.name || `Profile ${profile.profileIndex}`),
+          usesPrimaryAddons: profile.usesPrimaryAddons === true
+        }))
+      : []
+    if (!profiles.length) throw new Error('Nuvio returned no usable profiles.')
+
+    profileOptions.value = profiles
+    form.profileIds = profiles.map((profile: NuvioProfileOption) => profile.profileIndex)
+    profileLookupFallback.value = data.existingAccount === false
+    profilesLoaded.value = true
+    return true
+  } catch (error: any) {
+    errors.profiles = error.message || 'Nuvio profiles could not be loaded.'
+    return false
+  } finally {
+    profilesLoading.value = false
+  }
 }
 
 generatePassword()
@@ -656,6 +739,11 @@ function validatePage(page: WizardPage): string | null {
     }
   }
 
+  if (page === 'profiles' && form.profileIds.length === 0) {
+    errors.profiles = t.value.profilesRequiredError
+    return 'profiles'
+  }
+
   if (page === 'torbox' && !form.torboxApiKey.trim()) {
     errors.torboxApiKey = t.value.torboxReqError
     return 'torboxApiKey'
@@ -709,6 +797,11 @@ async function goNext() {
     return
   }
 
+  if (currentPage.value === 'account' && !await loadProfileOptions()) {
+    globalError.value = errors.profiles
+    return
+  }
+
   if (currentPage.value === 'penguplay' && !await createPenguplayConnection()) return
 
   formPage.value += 1
@@ -758,7 +851,8 @@ function startOver() {
     tmdbApiKey: '',
     tvdbApiKey: '',
     catalogMode: 'nuvio',
-    customCatalogUrl: ''
+    customCatalogUrl: '',
+    profileIds: []
   })
   setupPath.value = null
   setupMode.value = 'simple'
@@ -769,6 +863,7 @@ function startOver() {
   completedSteps.value = []
   activeStep.value = 'details'
   result.value = null
+  resetProfileSelection()
   currentView.value = 'choice'
 }
 
@@ -782,6 +877,7 @@ function handleRetry() {
       torboxApiKey: 'torbox',
       aiostreamsPassword: 'matching',
       customCatalogUrl: 'catalog',
+      profiles: 'profiles',
       penguplayAuth: 'penguplay'
     }
     openWizardPage(pageByField[lastErrorField.value] || 'account')
@@ -807,7 +903,8 @@ async function submitSetup() {
           email: form.email,
           nuvioPassword: form.nuvioPassword,
           penguplayReceipt: form.penguplayReceipt,
-          catalogMode: 'nuvio'
+          catalogMode: 'nuvio',
+          profileIds: form.profileIds
         }
       : setupMode.value === 'simple'
         ? {
@@ -881,6 +978,10 @@ async function submitSetup() {
       errors.penguplayAuth = errMsg
       lastErrorField.value = 'penguplayAuth'
       openWizardPage('penguplay')
+    } else if (step === 'profiles') {
+      errors.profiles = errMsg
+      lastErrorField.value = 'profiles'
+      openWizardPage('profiles')
     } else if (step === 'details' && /email/i.test(errMsg)) {
       errors.email = errMsg
       lastErrorField.value = 'email'
@@ -978,19 +1079,33 @@ async function submitSetup() {
                 <p class="page-note">{{ t.newAccountsAuto }}</p>
                 <label class="field" :class="{ 'has-error': errors.email }">
                   <span>{{ t.emailLabel }}</span>
-                  <input id="email" v-model="form.email" type="email" :placeholder="t.emailPlaceholder" autocomplete="email" required :aria-invalid="Boolean(errors.email)" :aria-describedby="errors.email ? 'email-error' : undefined" @input="errors.email = ''" />
+                  <input id="email" v-model="form.email" type="email" :placeholder="t.emailPlaceholder" autocomplete="email" required :aria-invalid="Boolean(errors.email)" :aria-describedby="errors.email ? 'email-error' : undefined" @input="handleAccountInput('email')" />
                   <small v-if="errors.email" id="email-error">{{ errors.email }}</small>
                 </label>
                 <label class="field" :class="{ 'has-error': errors.nuvioPassword }">
                   <span>{{ t.passwordLabel }}</span>
                   <span class="input-action">
-                    <input id="nuvioPassword" v-model="form.nuvioPassword" :type="showNuvioPassword ? 'text' : 'password'" :placeholder="t.passwordPlaceholder" autocomplete="current-password" required :aria-invalid="Boolean(errors.nuvioPassword)" :aria-describedby="errors.nuvioPassword ? 'nuvio-password-error' : undefined" @input="errors.nuvioPassword = ''" />
+                    <input id="nuvioPassword" v-model="form.nuvioPassword" :type="showNuvioPassword ? 'text' : 'password'" :placeholder="t.passwordPlaceholder" autocomplete="current-password" required :aria-invalid="Boolean(errors.nuvioPassword)" :aria-describedby="errors.nuvioPassword ? 'nuvio-password-error' : undefined" @input="handleAccountInput('nuvioPassword')" />
                     <button type="button" :aria-label="showNuvioPassword ? t.hideNuvioPassword : t.showNuvioPassword" :aria-pressed="showNuvioPassword" @click="showNuvioPassword = !showNuvioPassword">
                       <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5Z" /><circle cx="10" cy="10" r="2.5" /></svg>
                     </button>
                   </span>
                   <small v-if="errors.nuvioPassword" id="nuvio-password-error">{{ errors.nuvioPassword }}</small>
                 </label>
+              </template>
+
+              <template v-else-if="currentPage === 'profiles'">
+                <p v-if="profileLookupFallback" class="page-note">{{ t.profilesFallback }}</p>
+                <div id="profiles" class="profile-picker" role="group" :aria-label="t.profilesPageTitle" :aria-invalid="Boolean(errors.profiles)">
+                  <label v-for="profile in profileOptions" :key="profile.profileIndex" :class="{ active: form.profileIds.includes(profile.profileIndex) }">
+                    <input v-model="form.profileIds" type="checkbox" :value="profile.profileIndex" @change="errors.profiles = ''" />
+                    <span>
+                      <strong>{{ profile.name }}</strong>
+                      <small v-if="profile.usesPrimaryAddons">{{ t.profileSharesPrimary }}</small>
+                    </span>
+                  </label>
+                </div>
+                <small v-if="errors.profiles" class="profile-picker-error" role="alert">{{ errors.profiles }}</small>
               </template>
 
               <template v-else-if="currentPage === 'torbox'">
@@ -1079,8 +1194,9 @@ async function submitSetup() {
               <template v-else-if="currentPage === 'review'">
                 <div class="review-list">
                   <div><span><small>{{ t.reviewAccount }}</small><strong>{{ form.email }}</strong></span><button type="button" @click="openWizardPage('account')">{{ t.edit }}</button></div>
+                  <div><span><small>{{ t.reviewProfiles }}</small><strong>{{ profileSummary }}</strong></span><button type="button" @click="openWizardPage('profiles')">{{ t.edit }}</button></div>
                   <div><span><small>{{ t.reviewStreaming }}</small><strong>{{ setupPath === 'https' ? 'PenguPlay' : 'AIOStreams + TorBox' }}</strong></span><button type="button" @click="openWizardPage(setupPath === 'https' ? 'penguplay' : 'torbox')">{{ t.edit }}</button></div>
-                  <div><span><small>{{ t.reviewCatalog }}</small><strong>{{ setupPath === 'https' || setupMode === 'simple' ? t.catalogNuvio : catalogName }}</strong></span><button v-if="setupPath === 'debrid' && setupMode === 'advanced'" type="button" @click="openWizardPage('catalog')">{{ t.edit }}</button></div>
+                  <div><span><small>{{ t.reviewCatalog }}</small><strong>{{ setupPath === 'https' || setupMode === 'simple' ? t.catalogAutomatic : catalogName }}</strong></span><button v-if="setupPath === 'debrid' && setupMode === 'advanced'" type="button" @click="openWizardPage('catalog')">{{ t.edit }}</button></div>
                   <div v-if="setupPath === 'debrid'"><span><small>{{ t.modeLabel }}</small><strong>{{ setupMode === 'simple' ? t.simpleMode : t.advancedMode }}</strong></span><button type="button" @click="openWizardPage('mode')">{{ t.edit }}</button></div>
                   <div v-if="setupPath === 'debrid' && setupMode === 'advanced'"><span><small>{{ t.reviewMatching }}</small><strong>{{ matchingSummary }}</strong></span><button type="button" @click="openWizardPage('matching')">{{ t.edit }}</button></div>
                 </div>
@@ -1091,8 +1207,8 @@ async function submitSetup() {
 
           <footer class="wizard-footer">
             <button class="secondary-action" type="button" @click="goBack">{{ t.back }}</button>
-            <button class="primary-action" type="submit" :disabled="isSubmitting || penguplayCreateBusy || (currentPage === 'penguplay' && !penguplayCheckComplete)">
-              {{ penguplayCreateBusy ? t.penguVerifying : (currentPage === 'review' ? (setupPath === 'https' ? t.submitFree : t.submitPaid) : t.continue) }}
+            <button class="primary-action" type="submit" :disabled="isSubmitting || profilesLoading || penguplayCreateBusy || (currentPage === 'penguplay' && !penguplayCheckComplete)">
+              {{ profilesLoading ? t.profilesLoading : (penguplayCreateBusy ? t.penguVerifying : (currentPage === 'review' ? (setupPath === 'https' ? t.submitFree : t.submitPaid) : t.continue)) }}
               <svg v-if="currentPage !== 'review'" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h12M12 6l4 4-4 4" /></svg>
             </button>
           </footer>
@@ -1114,9 +1230,9 @@ async function submitSetup() {
           <p v-if="(lang || '').startsWith('nl')">{{ result.email }} is {{ result.nuvioAccountCreated ? 'aangemaakt' : 'gekoppeld' }}. {{ result.addons.join(' en ') }} is geïnstalleerd op {{ result.installedProfiles }} profiel{{ result.installedProfiles === 1 ? '' : 'en' }}.</p>
           <p v-else>{{ result.email }} was {{ result.nuvioAccountCreated ? 'created' : 'connected' }}. {{ result.addons.join(' and ') }} {{ result.addons.length === 1 ? 'was' : 'were' }} installed on {{ result.installedProfiles }} profile{{ result.installedProfiles === 1 ? '' : 's' }}.</p>
 
-          <div class="result-grid" :class="{ 'result-grid--single': !result.nuvioAccountCreated && !result.aiostreamsPassword }">
-            <section>
-              <span class="result-label">{{ result.setupPath === 'https' ? t.penguResultManifestLabel : t.aioManifestLabel }}</span>
+          <div v-if="result.setupPath !== 'https' || result.nuvioAccountCreated" class="result-grid" :class="{ 'result-grid--single': result.setupPath === 'https' }">
+            <section v-if="result.setupPath !== 'https'">
+              <span class="result-label">{{ t.aioManifestLabel }}</span>
               <div class="copy-row"><input :value="resultManifest" readonly /><button type="button" @click="handleCopy">{{ copySuccess ? t.copied : t.copy }}</button></div>
             </section>
             <section v-if="result.nuvioAccountCreated || result.aiostreamsPassword" class="credentials">
@@ -1204,6 +1320,14 @@ async function submitSetup() {
 .mode-picker button.active { border-color: var(--vp-c-divider); background: var(--vp-c-bg); color: var(--vp-c-text-1); box-shadow: 0 1px 3px rgb(0 0 0 / 5%); }
 .mode-picker span { font-size: 11px; font-weight: 700; }
 .mode-picker small { color: var(--vp-c-text-3); font-size: 9px; }
+.profile-picker { display: grid; gap: 8px; }
+.profile-picker label { display: flex; align-items: center; gap: 11px; padding: 11px 12px; border: 1px solid var(--vp-c-divider); border-radius: 9px; background: var(--vp-c-bg); cursor: pointer; }
+.profile-picker label.active { border-color: color-mix(in srgb, var(--vp-c-brand-1) 55%, var(--vp-c-divider)); background: color-mix(in srgb, var(--vp-c-brand-soft) 28%, var(--vp-c-bg)); }
+.profile-picker input { width: 16px; height: 16px; margin: 0; accent-color: var(--vp-c-brand-1); }
+.profile-picker span { display: grid; gap: 2px; }
+.profile-picker strong { color: var(--vp-c-text-1); font-size: 11px; }
+.profile-picker small { color: var(--vp-c-text-3); font-size: 9px; }
+.profile-picker-error { color: var(--vp-c-danger-1); font-size: 10px; }
 .field { display: grid; gap: 6px; margin: 0; }
 .field > span:first-child, .field-label-row { color: var(--vp-c-text-2); font-size: 11px; font-weight: 650; }
 .field input, .field select { box-sizing: border-box; width: 100%; min-height: 42px; padding: 9px 11px; border: 1px solid var(--vp-c-divider); border-radius: 8px; outline: none; background: var(--vp-c-bg); color: var(--vp-c-text-1); font: 13px var(--vp-font-family-base); transition: border-color .15s, box-shadow .15s; }

@@ -13,6 +13,7 @@ import {
   readFileSearchData
 } from './refresh-file-search.js';
 import {
+  loadNuvioProfileOptions,
   normalizePenguplayManifestUrl,
   runHttpsSetup,
   runSetup,
@@ -959,6 +960,19 @@ app.post('/api/penguplay/create', penguplayCreateLimiter, async (req, res) => {
   } catch (error) {
     console.error('[PenguPlay] User creation failed:', error.message || error);
     return res.status(502).json({ error: 'PenguPlay could not create the add-on. Please try again.' });
+  }
+});
+
+app.post('/api/ai/profiles', setupLimiter, async (req, res) => {
+  try {
+    const result = await loadNuvioProfileOptions(req.body?.email, req.body?.password);
+    res.set('Cache-Control', 'no-store');
+    return res.json(result);
+  } catch (error) {
+    const setupError = error instanceof SetupError
+      ? error
+      : new SetupError('Nuvio profiles could not be loaded. Please try again.');
+    return res.status(setupError.status).json({ error: setupError.message });
   }
 });
 

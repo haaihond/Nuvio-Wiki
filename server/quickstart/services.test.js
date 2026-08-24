@@ -3,9 +3,11 @@ import assert from 'node:assert/strict';
 
 import {
   isMetadataAddon,
+  isPenguplayAddon,
   mergeAddons,
   normalizePenguplayManifestUrl,
   resolveCatalogAddon,
+  selectAddonProfiles,
   serviceConstants,
   SetupError,
 } from './services.js';
@@ -71,6 +73,7 @@ test('recognizes supported metadata addons by name or manifest host', () => {
     { url: 'https://aiometadata.elfhosted.com/abc/manifest.json', name: 'Metadata' },
     { url: 'https://aiomd.atbphosting.com/manifest.json', name: 'Metadata' },
     { url: 'https://configured.example/abc/manifest.json', name: 'AIO Metadata' },
+    { url: 'https://media.example/stremio/selfhosted-user/manifest.json', name: null },
   ]) {
     assert.equal(isMetadataAddon(addon), true);
   }
@@ -78,6 +81,56 @@ test('recognizes supported metadata addons by name or manifest host', () => {
     isMetadataAddon({ url: 'https://subtitles.example/manifest.json', name: 'Subtitles' }),
     false
   );
+  assert.equal(
+    isMetadataAddon({
+      url: 'https://streams.example/stremio/user/password/manifest.json',
+      name: 'AIOStreams',
+    }),
+    false
+  );
+});
+
+test('reuses an installed PenguPlay addon instead of pushing a new one', () => {
+  const installedPenguplay = {
+    url: 'https://pengu.uk/%7B%22auth_token%22%3A%22existing%22%7D/manifest.json',
+    name: null,
+    enabled: true,
+  };
+  const requestedPenguplay = {
+    url: 'https://pengu.uk/%7B%22auth_token%22%3A%22new%22%7D/manifest.json',
+    name: 'PenguPlay',
+    enabled: true,
+  };
+  const metadata = {
+    url: 'https://media.example/stremio/user/manifest.json',
+    name: null,
+    enabled: true,
+  };
+  const other = { url: 'https://subtitles.example/manifest.json', name: 'Subtitles', enabled: true };
+
+  assert.equal(isPenguplayAddon(installedPenguplay), true);
+  assert.deepEqual(
+    mergeAddons([other, installedPenguplay, metadata], requestedPenguplay, resolveCatalogAddon()),
+    [metadata, installedPenguplay, other]
+  );
+});
+
+test('installs addons only on the selected effective profiles', () => {
+  const profiles = [
+    { profile_index: 1, name: 'Main', uses_primary_addons: false },
+    { profile_index: 2, name: 'Kids', uses_primary_addons: false },
+    { profile_index: 3, name: 'Shared', uses_primary_addons: true },
+  ];
+
+  assert.deepEqual(selectAddonProfiles(profiles, [2]), [profiles[1]]);
+  assert.deepEqual(selectAddonProfiles(profiles, [1, 2]), [profiles[0], profiles[1]]);
+  assert.deepEqual(selectAddonProfiles(profiles, [3]), [profiles[0]]);
+  assert.deepEqual(selectAddonProfiles(profiles, [1, 3]), [profiles[0]]);
+  assert.throws(
+    () => selectAddonProfiles(profiles, []),
+    (error) => error instanceof SetupError && error.step === 'profiles' && error.status === 400
+  );
+  assert.throws(() => selectAddonProfiles(profiles, [4]), /valid Nuvio profiles/);
 });
 
 test('keeps an installed metadata addon first without adding Nuvio Catalog', () => {
