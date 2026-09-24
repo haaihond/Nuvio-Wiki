@@ -7,19 +7,26 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Older glibc than Debian 12/13 so packaged native modules remain compatible.
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Install Dependencies
@@ -31,6 +38,9 @@ jobs:
       - name: Test Server
         run: npm --prefix server test
 
+      - name: Test deployment activation and rollback
+        run: bash deploy/test-activation.sh
+
       - name: Build docs and verify links
         env:
           VITEPRESS_BASE: /
@@ -40,3 +50,76 @@ jobs:
             scripts/render-mermaid.mjs
           grep -Fq "puppeteer.launch({ headless: 'shell', args: ['--no-sandbox'] })" scripts/render-mermaid.mjs
           npm run docs:build
+
+      - name: Package production release
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: |
+          npm --prefix server prune --omit=dev
+          mkdir -p release/docs/.vitepress
+          git archive HEAD docs server deploy | tar -x -C release
+          cp -a docs/.vitepress/dist release/docs/.vitepress/dist
+          cp -a server/node_modules release/server/node_modules
+          tar -czf nuvio-release.tar.gz -C release .
+
+      - name: Upload production release
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: production-release
+          path: |
+            nuvio-release.tar.gz
+            deploy/activate-release.sh
+          retention-days: 7
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-22.04
+    environment: production
+    concurrency:
+      group: nuvio-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: production-release
+
+      - name: Configure deployment SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST || '34.1.228.134' }}
+        run: |
+          test -n "$SSH_KEY" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/deploy_key ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host nuvio-production
+            HostName $DEPLOY_HOST
+            User nuvio-deploy
+            IdentityFile ~/.ssh/deploy_key
+            IdentitiesOnly yes
+            BatchMode yes
+            StrictHostKeyChecking yes
+            ConnectTimeout 20
+          EOF
+
+      - name: Upload and activate release
+        env:
+          RELEASE_ID: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A slower old build must not replace a newer commit already on main.
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          if [[ "$latest" != "$GITHUB_SHA" ]]; then
+            echo 'Skipping superseded commit.'
+            exit 0
+          fi
+          scp nuvio-release.tar.gz "nuvio-production:upload-$RELEASE_ID.tar.gz"
+          ssh nuvio-production bash -s -- "$RELEASE_ID" < deploy/activate-release.sh
+
+      - name: Remove runner SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

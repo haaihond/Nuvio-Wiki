@@ -6,6 +6,9 @@ A modern, searchable documentation site for Nuvio. The site is community-maintai
 
 [Local setup guide](RUNNING_LOCALLY.md) — install and run the wiki on your computer.
 
+[GitHub Actions deployment](deploy/GITHUB_ACTIONS.md) — build on GitHub and deploy
+the website and backend to the Debian server without compiling on the VPS.
+
 ## Documentation
 
 - [Quick Start](docs/quick-start.md)
