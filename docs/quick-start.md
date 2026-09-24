@@ -48,7 +48,7 @@ To enable metadata enrichment and external tracking, configure your external acc
 
 Go to **Settings** > **Integrations** to add your developer API keys:
 
-- **TMDB Enrichment** [Required for Mobile]: Toggle this feature **On** and input your personal **TMDB API Key** to fetch rich asset metadata.
+- **TMDB Enrichment** [Required for Mobile]: Toggle this feature **On** to fetch rich asset metadata. (Optional: You can enter your own key but Nuvio already bundles with one.)
 - **MDBList:** Toggle this feature **On** and input your **MDBList API Key** to bring in rating data.
 
 ---

@@ -28,7 +28,7 @@ Just like on Android Mobile, there are two ways to install Nuvio on Android TV. 
 3. Open Nuvio. You may be prompted to grant storage permissions and to allow Nuvio to install unknown apps. This is to allow Nuvio to update itself.
 
 **Play Store**
-1. You can obtain the Official Nuvio Play Store version by searching for it in the Play Store on the TV.
+1. ~~You can obtain the Official Nuvio Play Store version by searching for it in the Play Store on the TV.~~ As of now, and for the foreseeable future, Nuvio is **unavailable on the Google Play Store** following a DMCA complaint filed by the MPA. The development team has requested clarification regarding the complaint and is currently awaiting a response. Until the matter is resolved, installation through the Google Play Store is unavailable.
 
 ## Troubleshooting
 - **Play Protect Warning:** Since Nuvio is not on the Play Store, you might see a "Blocked by Play Protect" popup. Tap **More details** > **Install anyway**.
