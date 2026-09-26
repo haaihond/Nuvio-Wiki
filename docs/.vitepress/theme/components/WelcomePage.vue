@@ -43,7 +43,7 @@ import { siteRoutes } from '../../routes.mts'
             FOSS software plays a vital role in the world, and it is up to the users
             to keep these projects running.
           </p>
-          <a class="start-panel__support" href="https://tapframe.space/contribute" target="_blank" rel="noopener">
+          <a class="start-panel__support" href="https://nuvio.tv/support" target="_blank" rel="noopener">
             Please consider donating to keep free and open source projects running
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4h9v9M16 4 6 14" /></svg>
           </a>
