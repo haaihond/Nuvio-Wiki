@@ -26,4 +26,6 @@ Enhance the default scraping results with high-quality visual assets and aggrega
 ### 3. Watch Tracking & Syncing
 Keep your viewing history and custom lists synchronized across all your devices.
 - **Trakt (In-App):** Natively syncs your watch progress, scrobbles, and custom lists. Can be configured to run alongside or independently of Nuvio's internal sync engine. *Provides More Like This*.
+- **Simkl:** Syncs your anime, TV, and movie watch history across your devices with support for custom anime ID matching.
+- **MDBList:** Syncs watch status, personal watchlists, and custom lists across your devices.
 - **[Read the Metadata & Tracking Guide](./tmdb-mdblist-trakt.md)**

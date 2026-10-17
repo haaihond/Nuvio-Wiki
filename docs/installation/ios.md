@@ -1,16 +1,16 @@
 # iOS Installation [iOS Only]
 
-Nuvio on iOS is available on the app store or through **Sideloading** (AltStore/Sideloadly).
+Nuvio on iOS is available through **Sideloading** (AltStore/Sideloadly).
 
 >[!WARNING]
->Apple has removed Nuvio from the App Store and Testlight. The only current method to get Nuvio on iOS is through sideloading.
+>Apple has removed Nuvio from the App Store and TestFlight. The only current method to get Nuvio on iOS is through sideloading.
 
 >[!NOTE]
 >The app store version lacks some features of the sideloaded versions (e.g. plugins).
 
 ## App Store
 
-The Nuvio app can be obtained from the [app store here](https://apps.apple.com/us/app/nuvio-media/id676226222900).
+~~The Nuvio app can be obtained from the [app store here](https://apps.apple.com/us/app/nuvio-media/id676226222900).~~ As of now, Nuvio has been removed from the Apple App Store and TestFlight. Sideloading is the only current installation method.
 
 ## Sideloading
 
@@ -28,7 +28,7 @@ Sideloading Nuvio offers a few extra features. To get started choose one of the 
 
 4. Load the IPA file
    
-    - Open Sideloadly on your computer. Drag and drop your downloaded [.ipa file](https://github.com/luqmanfadlli/NuvioMobile-iOS/releases/download/0.2.21/Nuvio-v0.2.21-Full.ipa) directly into the Sideloadly window, or click the IPA icon on the left to browse your computer for the file.
+    - Open Sideloadly on your computer. Drag and drop your downloaded [.ipa file from the latest GitHub releases](https://github.com/luqmanfadlli/NuvioMobile-iOS/releases/latest) directly into the Sideloadly window, or click the IPA icon on the left to browse your computer for the file.
     
 5. Enter Apple ID and Start:
    
@@ -64,6 +64,6 @@ Sideloading Nuvio offers a few extra features. To get started choose one of the 
     - Scroll to the bottom and tap Developer Mode. Toggle it on, and your phone will restart to apply the change.
       
 6. Sideload the IPA file
-    - Download the [.ipa file](https://github.com/luqmanfadlli/NuvioMobile-iOS/releases/download/0.2.21/Nuvio-v0.2.21-Full.ipa) using Safari on your iPhone. 
+    - Download the [.ipa file from the latest GitHub releases](https://github.com/luqmanfadlli/NuvioMobile-iOS/releases/latest) using Safari on your iPhone. 
     - Open the new AltStore app on your home screen
     - Go to the My Apps tab, tap the + icon in the top left, and select your downloaded .ipa file to install it.

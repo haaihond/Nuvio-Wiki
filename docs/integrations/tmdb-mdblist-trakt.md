@@ -31,7 +31,11 @@ Optional: Paste your own v3 key into the **Personal API key** field and click Sa
 
 ---
 
-### MDBList Ratings
+### MDBList Integration
+
+MDBList provides rating score aggregation as well as watchlist and media tracking synchronization for your Nuvio library.
+
+#### MDBList Ratings
 
 MDBList aggregates rating scores from multiple platforms so you can see audience and critic scores directly on the metadata pages.
 
@@ -40,11 +44,24 @@ MDBList aggregates rating scores from multiple platforms so you can see audience
 2. Go to your account preferences to generate a free API key.
 3. Make sure you copy only the API key string itself, not the full URL.
 
-**Nuvio Configuration:**
+**Ratings Configuration:**
 1. Navigate to **Integrations** > **MDBList Ratings**.
 2. Toggle **Enable MDBList Ratings** to the on position.
 3. Paste your key into the **API Key** field and click Save.
 4. Select the external rating providers you wish to display. Supported options include **IMDb**, **TMDB**, **Rotten Tomatoes**, **Metacritic**, **Trakt**, **Letterboxd**, **MyAnimeList**, and **Audience Score**.
+
+#### MDBList Tracking
+
+Similar to Trakt and Simkl, MDBList can be connected to sync your watch history, watchlist, and custom lists across your devices.
+
+**How to Connect MDBList Tracking:**
+1. Navigate to **Settings** > **Tracking** (or **Integrations** > **MDBList**).
+2. Enter your **MDBList API Key** and select **Connect**.
+3. Once authenticated, your MDBList account will link to Nuvio.
+
+**Tracking Options:**
+- **Watchlist & List Syncing:** Sync your personal MDBList watchlists and custom lists with Nuvio.
+- **Watch Progress & History:** Keep your watched status and watch progress synchronized with your MDBList account.
 
 [Back to top](#table-of-contents)
 

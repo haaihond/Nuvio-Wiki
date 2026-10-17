@@ -10,6 +10,7 @@ Nuvio's settings allow for deep customization. Below is a detailed breakdown, no
 > Anything not labeled [Android TV Only], [Mobile Only], or [Windows Only] is a feature of all versions.
 
 ## 1. General & UI
+
 | Setting | Mobile | Android TV | Windows |
 | :--- | :--- | :--- | :--- |
 | **Theme** | Select custom accent color palettes:<br>![Crimson](https://placehold.co/16x16/E53935/E53935.png) Crimson, ![Ocean](https://placehold.co/16x16/1E88E5/1E88E5.png) Ocean, ![Violet](https://placehold.co/16x16/7E57C2/7E57C2.png) Violet, ![Emerald](https://placehold.co/16x16/43A047/43A047.png) Emerald, ![Amber](https://placehold.co/16x16/E1B300/E1B300.png) Amber, ![Rose](https://placehold.co/16x16/EC407A/EC407A.png) Rose, ![White](https://placehold.co/16x16/F7F7F4/F7F7F4.png) White.<br><br>Toggle **AMOLED Black** to use pure black backgrounds for OLED screens. | Select custom accent color palettes:<br>![Crimson](https://placehold.co/16x16/E53935/E53935.png) Crimson, ![Ocean](https://placehold.co/16x16/1E88E5/1E88E5.png) Ocean, ![Violet](https://placehold.co/16x16/7E57C2/7E57C2.png) Violet, ![Emerald](https://placehold.co/16x16/43A047/43A047.png) Emerald, ![Amber](https://placehold.co/16x16/E1B300/E1B300.png) Amber, ![Rose](https://placehold.co/16x16/EC407A/EC407A.png) Rose, ![White](https://placehold.co/16x16/F7F7F4/F7F7F4.png) White.<br><br>Toggle **AMOLED Mode** and **Pure Black Surfaces** to use pure black app backgrounds and card surfaces. | Select custom accent color palettes:<br>![Crimson](https://placehold.co/16x16/E53935/E53935.png) Crimson, ![Ocean](https://placehold.co/16x16/1E88E5/1E88E5.png) Ocean, ![Violet](https://placehold.co/16x16/7E57C2/7E57C2.png) Violet, ![Emerald](https://placehold.co/16x16/43A047/43A047.png) Emerald, ![Amber](https://placehold.co/16x16/E1B300/E1B300.png) Amber, ![Rose](https://placehold.co/16x16/EC407A/EC407A.png) Rose, ![White](https://placehold.co/16x16/F7F7F4/F7F7F4.png) White.<br><br>Toggle **AMOLED Black** to use pure black backgrounds for OLED screens. |
@@ -21,6 +22,7 @@ Nuvio's settings allow for deep customization. Below is a detailed breakdown, no
 [Back to top](#settings-breakdown)
 
 ## 2. Playback: [View Playback Guide](player.md)
+
 - **Internal Player:** Highly recommended for most users. Supports hardware decoding.
   - *Internal Engine:* Manually choose between ExoPlayer or libmpv as the primary background media core.
   - *Auto-switch engine on startup error* [Android TV Only]: Automatically falls back from ExoPlayer to libmpv for detected anime or if an initialization failure occurs.
@@ -38,6 +40,7 @@ Nuvio's settings allow for deep customization. Below is a detailed breakdown, no
 [Back to top](#settings-breakdown)
 
 ## 3. Account Integrations: [View Integrations Guide](/integrations/)
+
 - **Trakt.tv:** Syncs your "Up Next" list and watch history across all Nuvio devices. Includes *Library Source*, *Watch Progress*, *Continue Watching Window*, *Comments*, and *More Like This source* settings.
 - **Simkl:** Syncs anime, TV, and movie watch history. Includes *Anime ID preference* setting.
 - **TorBox / Premiumize:**
@@ -49,12 +52,13 @@ Nuvio's settings allow for deep customization. Below is a detailed breakdown, no
 > [!NOTE]
 > Using a metadata source that does not align with TMDB can cause issues with artwork and other metadata. If you have duplicate posters or other metadata issues turn off Artwork, Episodes, and Season Posters enrichment toggles.
 
-- **MDBList Ratings API:** Connects a custom key to fetch and layer platform rating scores (Trakt, IMDb, TMDB, Letterboxd, MyAnimeList, Rotten Tomatoes, Audience, and Metacritic) over title dashboard views.
+- **MDBList Integration:** Connects to synchronize watch status, watchlists, and custom lists, as well as fetch and layer platform rating scores (Trakt, IMDb, TMDB, Letterboxd, MyAnimeList, Rotten Tomatoes, Audience, and Metacritic) over title dashboard views.
 - **Anime Skip Integration:** Authorizes account validation links via an external Client ID to activate accurate crowd-sourced timestamp skipping triggers.
 
 [Back to top](#settings-breakdown)
 
 ## 4. Advanced: [View Playback Guide](player.md)
+
 - **Decoder Priority:** Dictates processing priorities across *Device decoders only* (strict hardware parsing), *Prefer device decoders* (hardware priority with software fallbacks), or *Prefer app decoders (FFmpeg)* (software processing for legacy formats).
 - **DV7 - HEVC Fallback:** Fixes distorted purple or green colors by falling back from unsupported Dolby Vision Profile 7 video to standard HEVC.
 - **Strip HDR10+ Metadata:** Removes HDR10+ dynamic metadata from the video stream when the display does not support it.
@@ -73,6 +77,7 @@ Nuvio's settings allow for deep customization. Below is a detailed breakdown, no
 [Back to top](#settings-breakdown)
 
 ## 5. Buffer and Network [Android TV Only]: [View Playback Guide](player.md#buffer-and-network-android-tv-only)
+
 These configurations govern internal memory allocation thresholds, local system caching pools, and network data transit rules. Full detail lives under [Player Settings → Buffer and Network](player.md#buffer-and-network-android-tv-only).
 
 - **ExoPlayer Native Memory:** Relocates the ready-ahead playback buffer into a more efficient area of device memory so high-bitrate streams can maintain larger ahead-buffers without exhausting the app's limited private memory share on TV sticks and boxes. Displays device RAM and a recommended safety limit.
@@ -89,6 +94,7 @@ These configurations govern internal memory allocation thresholds, local system 
 [Back to top](#settings-breakdown)
 
 ## 6. Customization & Management
+
 - **Profiles:** Manage multiple users, watch histories, and recommendations separately. [View Profiles Guide](profiles.md)
 - **Collections:** Create deep custom collections grouping media by genre, studio, or custom lists. [View Collections Guide](collections.md).
 - **Backup & Synchronization:** Exports or imports compiled application configurations to instantly mirror visual formats, tracking scripts, and engine limits across backup hardware keys.
@@ -96,6 +102,7 @@ These configurations govern internal memory allocation thresholds, local system 
 [Back to top](#settings-breakdown)
 
 ## 7. Downloads & Notifications [Mobile Only]
+
 - **Downloads:** Manage offline media downloads including storage location and quality preferences.
 - **Notifications:** Configure *Episode release alerts* to receive push notifications when new episodes are released. Includes a *Test notification* option to verify setup.
 

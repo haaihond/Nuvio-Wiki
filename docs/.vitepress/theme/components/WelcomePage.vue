@@ -44,7 +44,7 @@ import { siteRoutes } from '../../routes.mts'
             to keep these projects running.
           </p>
           <a class="start-panel__support" href="https://nuvio.tv/support" target="_blank" rel="noopener">
-            Please consider donating to keep free and open source projects running
+            Please consider getting a supporter package to keep free and open source projects running
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4h9v9M16 4 6 14" /></svg>
           </a>
         </div>
@@ -96,7 +96,7 @@ import { siteRoutes } from '../../routes.mts'
             </svg>
           </span>
           <h3>Installation Guides</h3>
-          <p>Installation guides for Android TV, Android Mobile, iOS, WebOS, and Tizen.</p>
+          <p>Installation guides for Android TV, Android Mobile, iOS, Windows, macOS, WebOS, and Tizen.</p>
         </a>
 
         <a class="guide-card guide-card--green" :href="withBase(siteRoutes.addons)">
@@ -126,7 +126,7 @@ import { siteRoutes } from '../../routes.mts'
             </svg>
           </span>
           <h3>Settings Breakdown</h3>
-          <p>A complete breakdown of settings and preferences for Mobile and Android TV.</p>
+          <p>A complete breakdown of settings and preferences for Mobile, Android TV, and Windows.</p>
         </a>
 
         <a class="guide-card guide-card--violet" :href="withBase(siteRoutes.player)">
@@ -226,7 +226,7 @@ import { siteRoutes } from '../../routes.mts'
       <h2 id="contribution-heading">Contribution</h2>
       <p>
         Contributions are vital! Please see the
-        <a href="https://github.com/sappy-69/Nuvio-Wiki/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contributing Guide</a>
+        <a href="https://github.com/haaihond/Nuvio-Wiki/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contributing Guide</a>
         to help improve these docs.
       </p>
     </section>

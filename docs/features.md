@@ -16,5 +16,7 @@
 
 **Integration & Tracking**
 1. Native Trakt Integration: Nuvio connects directly to your Trakt account to automatically track your watch progress, sync your history across all your devices, and pull in your personalized watchlists.
-2. Debrid Integration: Nuvio has native debrid integration for Torbox and Premiumize.
-3. Mobile Notifications: On iOS and Android, Nuvio can send push notifications to alert you when a new episode of a show you are tracking airs.
+2. Simkl Integration: Sync your anime, TV, and movie watch history across your devices with support for custom anime ID matching.
+3. MDBList Tracking: Connect your MDBList API key to sync watch status, watchlists, and custom lists, as well as display aggregated rating scores.
+4. Debrid Integration: Nuvio has native debrid integration for Torbox and Premiumize.
+5. Mobile Notifications: On iOS and Android, Nuvio can send push notifications to alert you when a new episode of a show you are tracking airs.

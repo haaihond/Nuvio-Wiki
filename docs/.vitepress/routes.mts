@@ -7,6 +7,8 @@ export const siteRoutes = {
   installation: '/installation/',
   androidTV: '/installation/android-tv',
   androidMobile: '/installation/android-mobile',
+  windows: '/installation/windows',
+  macos: '/installation/macos',
   ios: '/installation/ios',
   webos: '/installation/webos',
   addons: '/integrations/addons',
