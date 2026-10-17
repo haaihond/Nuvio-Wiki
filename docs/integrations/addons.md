@@ -102,7 +102,7 @@ AIOStreams is the most popular "super-addon" — it aggregates results from mult
 
 | Addon | Configure URL |
 |---|---|
-| **Torrentio** | [torrentio.strem.fun](https://torrentio.strem.fun) |
+| **Torrentio** | [torrentio.strem.fun](https://torrentio.strem.fun)<br>Guides: [troubleshooting checklist](https://torentio.com/torrentio-troubleshooting-guide/) |
 | **Comet** | [comet.feels.legal/configure](https://comet.feels.legal/configure) |
 | **StremThru** | [stremthru.13377001.xyz](https://stremthru.13377001.xyz/) |
 | **Meteor** | [meteorfortheweebs.midnightignite.me/configure](https://meteorfortheweebs.midnightignite.me/configure) |
