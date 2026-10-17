@@ -23,7 +23,7 @@ On the surface, both give you streams. Underneath, they operate entirely differe
 | **Scope** | Catalogs, metadata, subtitles, live TV, and streams | Streams only |
 | **Portability** | Works in any Stremio-protocol client (Stremio, Nuvio, others) | Nuvio-specific |
 
-Addons are recommened to use over plugins.
+Addons are recommended to use over plugins.
 
 [Back to top](#addons)
 

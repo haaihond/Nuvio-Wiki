@@ -449,7 +449,7 @@ Automatically fetching all available subtitle tracks at startup can delay or int
 
 ### 8.1 Android Phone & Tablet
 
-- **Sideloading:** Nuvio is distributed can be distributed as an APK. Enable **Install from Unknown Sources** under **Settings → Security** (or **Settings → Apps → Special App Access → Install Unknown Apps**) before installing. For full installation instructions, see the [Android Mobile Installation Guide](installation/android-mobile.md).
+- **Sideloading:** Nuvio can be distributed as an APK. Enable **Install from Unknown Sources** under **Settings → Security** (or **Settings → Apps → Special App Access → Install Unknown Apps**) before installing. For full installation instructions, see the [Android Mobile Installation Guide](installation/android-mobile.md).
 - **Picture-in-Picture (PiP):** If PiP does not work, go to **Device Settings → Apps → Nuvio → Picture-in-Picture** and enable it.
 - **Orientation lock:** If the app is stuck in portrait or landscape mode, check your system-level screen rotation lock.
 

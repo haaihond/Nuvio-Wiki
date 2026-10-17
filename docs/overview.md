@@ -39,7 +39,7 @@ Nuvio operates on a modular architecture using **Addons**. By itself, Nuvio is a
 
 ## Key Features
 
-- **Cross-Platform:** Available on Android (Mobile & TV), iOS, and Windows.
+- **Cross-Platform:** Available on Android (Mobile & TV), iOS, Windows, macOS, WebOS, and Tizen.
 - **Unified Search:** Search across all installed addons simultaneously.
 - **Profiles:** Add profiles to keep everything separate.
 - **Intro/Outro Skip:** Uses introDB to skip intros and outros.

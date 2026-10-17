@@ -6,7 +6,7 @@
 ---
 
 ### Is Nuvio free?
-Yes, Nuvio is free and open source software (FOSS). Nuvio runs on donations. Please consider [donating](https://tapframe.space/contribute).
+Yes, Nuvio is free and open source software (FOSS). Nuvio runs on donations. Please consider [donating](https://nuvio.tv/support).
 
 ### Where can I get the official app?
 Visit the official Nuvio [website](https://nuvio.tv/).
