@@ -170,6 +170,7 @@ These addons fetch subtitles for your content from various providers.
 | **SubSense** | [subsense.nepiraw.com/configure](https://subsense.nepiraw.com/configure) |
 | **SubMaker** | [submaker.elfhosted.com/configure](https://submaker.elfhosted.com/configure?config=bedadbea77057c6e79adb38710386e3d) |
 | **AIO Subtitles** | [aio-streaming.baby-beamup.club](https://3b4bbf5252c4-aio-streaming.baby-beamup.club/configure) |
+| **Auto-Subs** | [dash.auto-subs.com/#settings](https://dash.auto-subs.com/#settings) |
 
 > [!TIP]
 > Nuvio has a dedicated **Addon Subtitle Startup** setting (under **Settings > Player**) that controls when subtitle addons are queried:
