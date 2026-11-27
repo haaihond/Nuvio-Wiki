@@ -181,6 +181,18 @@ These addons fetch subtitles for your content from various providers.
 
 ---
 
+### Live TV & Sports Addons
+
+These addons provide live television channels and live sports schedules directly inside Nuvio.
+
+| Addon | Language | Manifest URL |
+| --- | --- | --- |
+| **GuiRepo TV & Esportes BR** ([GitHub](https://github.com/guilhermehanti/guirepo/tree/main/guirepo-tv-addon)) | PT-BR | [guirepo-tv-addon.mgaengenhariapr.workers.dev/manifest.json](https://guirepo-tv-addon.mgaengenhariapr.workers.dev/manifest.json) |
+
+[Back to top](#addons)
+
+---
+
 ## Installing an addon
 
 To install an addon, you need its manifest URL — obtained from the addon's configuration website by picking your settings and clicking "Install" or "Copy Link."
